@@ -1,0 +1,16 @@
+# Byte‑compiled / cache
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual env & editor artefacts
+.venv/
+.env
+.idea/
+
+# Data & model artefacts (tracked elsewhere)
+data/
+models/
+
+# Jupyter notebooks checkpoints
+**/.ipynb_checkpoints/
