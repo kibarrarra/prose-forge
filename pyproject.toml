@@ -3,13 +3,17 @@ name = "proseforge"
 version = "0.1.0"
 description = "ProseForge – refine web‑novel chapters into polished English prose"
 requires-python = ">=3.10"
+
+# Core runtime dependencies
+# Add new libs here (PEP 621 compliant list)
 dependencies = [
     "openai>=1.0.0",      # LLM inference backend
-    "datasets>=2.19.0",   # dataset loading & streaming
-    "sacrebleu>=2.4.0",   # BLEU / quality metrics
+    "datasets>=2.19.0",   # corpus IO (optional but handy)
+    "sacrebleu>=2.4.0",   # quality metrics
     "pydantic>=2.6.0",    # typed configs
     "python-dotenv>=1.0.1",
-    "tqdm>=4.66.0"
+    "tqdm>=4.66.0",
+    "lightnovel-crawler>=3.7.5" # to grab raws
 ]
 
 [tool.black]
