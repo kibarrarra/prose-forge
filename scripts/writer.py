@@ -14,10 +14,7 @@ import argparse, json, math, pathlib, re, sys, textwrap
 from utils.paths import RAW_DIR, SEG_DIR, CTX_DIR, DRAFT_DIR, CONFIG_DIR
 from typing import Optional, TypedDict
 from utils.io_helpers import read_utf8, write_utf8
-
-import httpx
-from openai import OpenAI
-from dotenv import load_dotenv ; load_dotenv()
+from utils.openai_client import get_openai_client
 from ftfy import fix_text
 
 
@@ -34,14 +31,7 @@ OUT  = DRAFT_DIR
 CFG  = CONFIG_DIR
 
 # ── OpenAI client ────────────────────────────────────────────────────────────
-timeout = httpx.Timeout(
-    connect=30.0,
-    read=600.0,
-    write=600.0,
-    pool=60.0
-)
-
-client = OpenAI(timeout=timeout)
+client = get_openai_client()
 
 # ── utilities ────────────────────────────────────────────────────────────────
 def die(msg: str) -> None:
@@ -108,7 +98,18 @@ def load_raw_text(path: pathlib.Path) -> tuple[str, str]:
 
 # ── prompt builders ─────────────────────────────────────────────────────────
 def build_author_prompt(source: str, voice_spec: str, length_hint: str,
-                        prev_final: Optional[str], persona: Optional[str]) -> list[dict]:
+                        prev_final: Optional[str], persona: Optional[str],
+                        critic_feedback: Optional[dict] = None,
+                        include_raw: bool = True,
+                        raw_ending: str | None = None) -> list[dict]:
+    """Compose prompt for the LLM.
+
+    Args:
+        include_raw: If False, omit the RAW SOURCE block. Useful for iterative
+        review rounds where we want the model to focus on the previous draft
+        plus feedback to minimise drift.
+    """
+
     persona_note = f" as {persona}" if persona else ""
     system = textwrap.dedent(f"""\
         You are 'Chapter-Author'{persona_note}. Follow the voice spec. {length_hint}
@@ -117,11 +118,40 @@ def build_author_prompt(source: str, voice_spec: str, length_hint: str,
         ----------
         {voice_spec}
         """)
-    user_parts = [f"RAW SOURCE:\n{source}"]
+
+    user_parts: list[str] = []
+    if include_raw:
+        user_parts.append(f"RAW SOURCE:\n{source}")
     if prev_final:
         user_parts.append(f"PREVIOUS FINAL CHAPTER:\n{prev_final}")
-    return [{"role": "system", "content": system},
-            {"role": "user",   "content": "\n\n".join(user_parts)}]
+    if critic_feedback:
+        user_parts.append(textwrap.dedent(f"""\
+            CRITIC FEEDBACK:
+            ---------------
+            Critic A: {critic_feedback.get('critic_A_summary', '')}
+            Critic B: {critic_feedback.get('critic_B_summary', '')}
+
+            Discussion: {critic_feedback.get('discussion_transcript', '')}
+
+            Please incorporate the key insights from this feedback into your writing.
+            """))
+
+    # Always provide raw ending discipline snippet so model mirrors exact beat
+    if raw_ending:
+        user_parts.append(textwrap.dedent(f"""\
+            RAW ENDING (last ≈60 words):
+            ---------------------------
+            {raw_ending}
+
+            Your final sentence must conclude on the *same narrative beat*.
+            Absolutely forbid introduction of foreshadowing or closure that is
+            absent in the RAW ENDING.
+            """))
+
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": "\n\n".join(user_parts)}
+    ]
 
 def build_revision_prompt(current: str, notes: dict,
                           voice_spec: str) -> list[dict]:
@@ -165,33 +195,46 @@ def latest_version(folder: DIR, persona: str, sample: bool) -> int:
 
 # ── main actions ────────────────────────────────────────────────────────────
 def make_first_draft(text: str, chap_id: str, args, voice_spec: str,
-                     prev_final: Optional[str]) -> pathlib.Path:
+                     prev_final: Optional[str], critic_feedback: Optional[dict] = None) -> pathlib.Path:
     # sample truncation
     if args.sample:
         text = " ".join(text.split()[: args.sample])
-    src_words = len(text.split())
+    # Determine reference length: use previous draft if available to preserve
+    # pacing; otherwise base it on RAW text.
+    reference_text = prev_final if prev_final else text
+    src_words = len(reference_text.split())
     target_words = args.target_words or int(src_words * args.target_ratio)
     length_hint = f"Match the source length within ±10 % (≈{target_words} words)."
     max_toks = estimate_max_tokens(target_words)
 
+    include_raw = prev_final is None
+
+    # extract raw ending ~60 words
+    raw_ending = " ".join(text.split()[-60:]) if include_raw else None
+
     prompt = build_author_prompt(text, voice_spec, length_hint,
-                                 prev_final, args.persona)
+                                 prev_final, args.persona, critic_feedback,
+                                 include_raw=include_raw,
+                                 raw_ending=raw_ending)
     draft = call_llm(prompt, temp=0.7, max_tokens=max_toks)
 
-    # Determine output directory based on whether this is an audition
+    # For auditions, write to the audition directory
     if args.audition_dir:
         folder = args.audition_dir
+        # Use chapter ID as filename for audition drafts
+        path = folder / f"{chap_id}.txt"
     else:
+        # Regular mode uses the chapter directory
         folder = OUT / chap_id
-    folder.mkdir(parents=True, exist_ok=True)
+        folder.mkdir(parents=True, exist_ok=True)
+        fname = draft_name(args.persona, bool(args.sample), 1)
+        path = folder / fname
     
-    fname  = draft_name(args.persona, bool(args.sample), 1)
-    path   = folder / fname
     write_utf8(path, draft)
     return path
 
 def make_revision(chap_id: str, args, voice_spec: str) -> pathlib.Path:
-    notes = json.loads(args.revise.read_text())
+    notes = json.loads(read_utf8(args.revise))
     if not any(k in notes for k in ("rewrite", "cut", "keep")):
         die("Revision notes must have at least 'rewrite', 'cut' or 'keep'.")
 
@@ -200,14 +243,14 @@ def make_revision(chap_id: str, args, voice_spec: str) -> pathlib.Path:
     if v_now == 0:
         die("No existing draft to revise.")
 
-    current = (folder / draft_name(args.persona, bool(args.sample), v_now)).read_text()
+    current = read_utf8(folder / draft_name(args.persona, bool(args.sample), v_now))
     max_toks = estimate_max_tokens(len(current.split()))
     prompt = build_revision_prompt(current, notes, voice_spec)
     new_draft = call_llm(prompt, temp=0.4, max_tokens=max_toks)
 
     fname = draft_name(args.persona, bool(args.sample), v_now + 1)
     path  = folder / fname
-    path.write_text(new_draft, encoding="utf-8")
+    write_utf8(path, new_draft)
     return path
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -226,6 +269,8 @@ def parse_args() -> argparse.Namespace:
                    help="JSON notes file from critic/auditor")
     p.add_argument("--audition-dir", type=DIR,
                    help="Directory for audition drafts (e.g. drafts/auditions/persona_1)")
+    p.add_argument("--critic-feedback", type=DIR,
+                   help="JSON file containing critic feedback for final version")
     return p.parse_args()
 
 def main() -> None:
@@ -239,13 +284,18 @@ def main() -> None:
         die(f"Voice spec not found: {spec_path}")
     voice_spec = read_utf8(spec_path)
 
-    prev_final = args.prev.read_text() if args.prev and args.prev.exists() else None
+    prev_final = read_utf8(args.prev) if args.prev and args.prev.exists() else None
+    
+    # Load critic feedback if provided
+    critic_feedback = None
+    if args.critic_feedback and args.critic_feedback.exists():
+        critic_feedback = json.loads(read_utf8(args.critic_feedback))
 
     if args.revise:
         out = make_revision(chap_id, args, voice_spec)
         log.info("✔ revision → %s", out)
     else:
-        out = make_first_draft(raw_text, chap_id, args, voice_spec, prev_final)
+        out = make_first_draft(raw_text, chap_id, args, voice_spec, prev_final, critic_feedback)
         log.info("✔ draft → %s", out)
 
 if __name__ == "__main__":

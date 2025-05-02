@@ -31,13 +31,13 @@
 
 * Lexicon may use *gloaming, sepulchral, eldritch*.
   Avoid archaic spellings that hinder clarity.
-* Narration: formal; no contractions or modern slang.
+* Narration: formal; no contractions or modern slang aside from the narrator's internal thoughts.
 * Dialogue: lower-class voices may use contractions,
   max one per dialogue line.
 
 ## 5. Register & Point of View
 
-* Limited-third or first-person, past tense.  
+* Mirror perspective of the original text.  
 * Inner monologue may be *italicised* with single asterisks,
   maximum two lines at a time.
 
