@@ -10,7 +10,8 @@ Core modes
 """
 
 from __future__ import annotations
-import argparse, json, math, pathlib, re, sys, textwrap, logging
+import argparse, json, math, pathlib, re, sys, textwrap
+from utils.paths import RAW_DIR, SEG_DIR, CTX_DIR, DRAFT_DIR, CONFIG_DIR
 from typing import Optional, TypedDict
 from utils.io_helpers import read_utf8, write_utf8
 
@@ -20,22 +21,17 @@ from dotenv import load_dotenv ; load_dotenv()
 from ftfy import fix_text
 
 
-logging.basicConfig(
-    filename="logs/writer.log",
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [writer] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-log = logging.getLogger("writer")
+# ── logging setup ────────────────────────────────────────────
+from utils.logging_helper import get_logger
+log = get_logger()
 
 # ── project paths ────────────────────────────────────────────────────────────
 DIR = pathlib.Path
-RAW  = DIR("data/raw/chapters")
-SEG  = DIR("data/segments")
-CTX  = DIR("data/context")
-OUT  = DIR("drafts")
-CFG  = DIR("config")
-SPEC_DEFAULT = CFG / "voice_spec.md"
+RAW  = RAW_DIR
+SEG  = SEG_DIR
+CTX  = CTX_DIR
+OUT  = DRAFT_DIR
+CFG  = CONFIG_DIR
 
 # ── OpenAI client ────────────────────────────────────────────────────────────
 timeout = httpx.Timeout(
@@ -156,13 +152,13 @@ def call_llm(msgs: list[dict], temp: float, max_tokens: int) -> str:
     return res.choices[0].message.content.strip()
 
 # ── filename helpers ────────────────────────────────────────────────────────
-def draft_name(sample: bool, version: int) -> str:
+def draft_name(persona: str, sample: bool, version: int) -> str:
     tag = "_sample" if sample else ""
-    return f"author{tag}_v{version}.txt"
+    return f"{persona}{tag}_v{version}.txt"
 
-def latest_version(folder: DIR, sample: bool) -> int:
+def latest_version(folder: DIR, persona: str, sample: bool) -> int:
     tag = "_sample" if sample else ""
-    drafts = sorted(folder.glob(f"author{tag}_v*.txt"))
+    drafts = sorted(folder.glob(f"{persona}{tag}_v*.txt"))
     if not drafts:
         return 0
     return int(re.search(r"_v(\d+)", drafts[-1].stem)[1])
@@ -182,9 +178,14 @@ def make_first_draft(text: str, chap_id: str, args, voice_spec: str,
                                  prev_final, args.persona)
     draft = call_llm(prompt, temp=0.7, max_tokens=max_toks)
 
-    folder = OUT / chap_id
+    # Determine output directory based on whether this is an audition
+    if args.audition_dir:
+        folder = args.audition_dir
+    else:
+        folder = OUT / chap_id
     folder.mkdir(parents=True, exist_ok=True)
-    fname  = draft_name(bool(args.sample), 1)
+    
+    fname  = draft_name(args.persona, bool(args.sample), 1)
     path   = folder / fname
     write_utf8(path, draft)
     return path
@@ -195,16 +196,16 @@ def make_revision(chap_id: str, args, voice_spec: str) -> pathlib.Path:
         die("Revision notes must have at least 'rewrite', 'cut' or 'keep'.")
 
     folder = OUT / chap_id
-    v_now  = latest_version(folder, bool(args.sample))
+    v_now  = latest_version(folder, args.persona, bool(args.sample))
     if v_now == 0:
         die("No existing draft to revise.")
 
-    current = (folder / draft_name(bool(args.sample), v_now)).read_text()
+    current = (folder / draft_name(args.persona, bool(args.sample), v_now)).read_text()
     max_toks = estimate_max_tokens(len(current.split()))
     prompt = build_revision_prompt(current, notes, voice_spec)
     new_draft = call_llm(prompt, temp=0.4, max_tokens=max_toks)
 
-    fname = draft_name(bool(args.sample), v_now + 1)
+    fname = draft_name(args.persona, bool(args.sample), v_now + 1)
     path  = folder / fname
     path.write_text(new_draft, encoding="utf-8")
     return path
@@ -213,8 +214,8 @@ def make_revision(chap_id: str, args, voice_spec: str) -> pathlib.Path:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("chapter", help="Chapter id (lotm_0006) or path to JSON/TXT")
-    p.add_argument("--spec", type=DIR,
-                   help="Voice spec file (default: config/voice_spec.md)")
+    p.add_argument("--spec", type=DIR, required=True,
+                   help="Voice spec markdown file")
     p.add_argument("--persona", help="Persona label for auditions")
     p.add_argument("--sample", type=int,
                    help="Use only first N words of RAW SOURCE")
@@ -223,6 +224,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prev", type=DIR, help="Previous locked chapter")
     p.add_argument("--revise", type=DIR,
                    help="JSON notes file from critic/auditor")
+    p.add_argument("--audition-dir", type=DIR,
+                   help="Directory for audition drafts (e.g. drafts/auditions/persona_1)")
     return p.parse_args()
 
 def main() -> None:
@@ -231,13 +234,7 @@ def main() -> None:
     raw_text, chap_id = load_raw_text(chap_path)
 
     # ── voice spec resolution ─────────────────────────────────────────────
-    if args.spec:
-        spec_path = args.spec
-    elif args.persona:
-        spec_path = pathlib.Path(f"config/voice_specs/{args.persona}.md")
-    else:
-        spec_path = SPEC_DEFAULT
-
+    spec_path = args.spec
     if not spec_path.exists():
         die(f"Voice spec not found: {spec_path}")
     voice_spec = read_utf8(spec_path)

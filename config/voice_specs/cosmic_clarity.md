@@ -1,33 +1,34 @@
-VOICE SPEC — Cosmic Clarity  
-============================
+markdown
+## COSMIC CLARITY – Voice Spec v5
 
-* **Bedrock clarity (Sanderson)**  
-  * Concrete verbs and nouns: write *“He slammed the hatch”*, not *“He made an emphatic closure of the hatch.”*  
-  * Keep most sentences ≤ 20 words; use short paragraphs to pace action.
+*Readable modern pacing with Victorian flavour, incorporating a slow-burn cosmic menace, enhanced clarity, greater depth of dread, reduced verbosity, and meticulous redundancy checks in effect.*
 
-* **Undercurrent of cosmic dread (Lovecraft)**  
-  * Every scene should hint that reality is larger and more uncaring than the characters realise.  
-  * Permit one or two long, spiralling sentences per page to convey vertigo or terror.  
-  * Never name the horror outright; describe texture, sound, or geometry that “should not be.”
+### **1. Clarity Enhancements**
+* Replace vague nouns and verbs with precise terms; aim for concise, straightforward language.
+* Average sentence length should be ≤ 17 words; limit to 25 only when necessary.
 
-* **Victorian gothic colour**  
-  * Lexicon: “lanthorn,” “gloaming,” “sepulchral,” but avoid impenetrable archaic spellings.  
-  * No modern slang or contractions in narration; dialogue may loosen slightly for lower-class voices.
+### **2. Enhanced Cosmic Dread**
+* Utilize vivid visual and sensory details to evoke unsettling atmospheres in every scene.
+* Apply metaphors that convey deep unease without overtly describing horror.
 
-* **Register & POV**  
-  * Tight limited-third or first-person past tense.  
-  * Inner monologue can be italicised; keep it brief.
+### **3. Victorian Gothic Detail**
+* Use a lexicon appropriate for the era while ensuring it's accessible to contemporary readers.
+* Character dialogue should reflect their background, with contractions used judiciously.
 
-* **Punctuation & rhythm**  
-  * Normal prose rhythm  →  3-5 short/medium sentences.  
-  * Rising dread         →  one em-dash-laden or semi-colon chain sentence.
+### **4. Rhythm and Structure**
+* Standard flow of 3–5 varied sentence lengths per paragraph, integrating one em-dash or semicolon to build tension.
+* Conclude paragraphs on mood pivots, with final clauses limited to ≤ 6 words.
 
-* **Taboos**  
-  * No comedy punchlines; humour, if any, is dry or ironic.  
-  * No explicit gore for its own sake—imply more than you show.
+### **5. Redundancy and Repetition Management**
+* Introduce new descriptors if object or state changes and limit adjectives to one per noun unless contrast is warranted.
+* Avoid repeating identical phrases within a 120-word span.
 
-* **Continuity rules**  
-  * Always respect previously established character traits and timeline events.  
-  * Spell eldritch terms consistently.
+### **6. Taboos**
+* Emphasize dry or ironic humor; while implied gore is permissible, overt gore should be avoided.
 
-Target effect: *readable modern pacing* with *Victorian flavour* and a *slow-burn sense of cosmic menace*.
+### **7. Continuity**
+* Maintain established facts, updating the lore table as necessary.
+
+### **8. Ending Discipline**
+* Ensure narrative closure on a consistent beat; allow a maximum adjustment of five tokens for diction or clarity.
+* Banned phrases within the last forty words: *journey, destiny, fate, void, little did, “I resolved”, “Thus began,”* or any future-tense pledges.

@@ -1,0 +1,9 @@
+graph LR
+A[Personae drafts<br/>chap 1-3] --> B[Voice-Trait Extractor]
+B --> C[Score & Rank]
+C --> D{Human pick<br/>top 2-3}
+D --> E[Spec Synthesizer]
+E --> F[Test Spec<br/>writer.py chap 4]
+F --> G[Critic feedback]
+G -->|OK| H[Lock voice_spec.md]
+G -->|revise| B

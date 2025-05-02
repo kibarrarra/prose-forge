@@ -4,7 +4,7 @@ audition.py – Generate specimen drafts for a list of personae
                  on the first three chapters (full length).
 
 Outputs:
-    drafts/<chap>/author_v1.txt, author_v1_sample is *not* used.
+    drafts/<chap>/<persona>.txt, sample is *not* used.
 
 Default personae are every *.md in config/voice_specs/.
 """
