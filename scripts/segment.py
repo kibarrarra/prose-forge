@@ -1,15 +1,20 @@
 #!/usr/bin/env python
 """
-segment.py – slice chapters into numbered paragraphs or sentences.
+segment.py – slice novels into chapters, then paragraphs or sentences.
 
-Examples
---------
-# Paragraph-split a single JSON novel
-python scripts/segment.py --in data/raw/lotm/lotm_full.json --out data/segments
+Quick examples
+--------------
 
-# Sentence-split every .txt/.json in a folder, recurse, and emit a CSV
-python scripts/segment.py --in data/raw/lotm --out data/segments \
-                          --mode sent --csv data/segments/summary.csv --recursive
+# 1) Segment a per-chapter JSON into paragraphs
+python scripts/segment.py --in data/raw/chapters/lotm_0001.json --out data/segments
+
+# 2) Split a mega-JSON into chapters *and* paragraphs
+python scripts/segment.py --in data/raw/lotm/lotm_full.json \
+        --split-per-chapter --chapters-out data/raw/chapters --out data/segments
+
+# 3) Only create per-chapter JSON (no segments yet)
+python scripts/segment.py --in data/raw/lotm/lotm_full.json \
+        --split-per-chapter --no-segments
 """
 
 from __future__ import annotations
@@ -17,127 +22,109 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import html
-import tqdm
-from typing import TextIO
-from ftfy import fix_text
 import re
 import sys
 import unicodedata
 from pathlib import Path
 from typing import Iterable, List, Literal
 
-# ─── Progress bar (optional) ─────────────────────────────────────────────────
+# ─── optional deps ────────────────────────────────────────────────────────────
 try:
-    from tqdm import tqdm  # type: ignore
-except ImportError:        # noqa: D401
-    tqdm = lambda x, **kw: x  # dummy: just return the iterable unchanged
+    from tqdm import tqdm  # progress bar
+except ImportError:  # noqa: D401 – dummy fallback keeps code simple
+    tqdm = lambda x, **kw: x  # type: ignore
 
+from ftfy import fix_text
+from dotenv import load_dotenv
 
+load_dotenv()  # for scripts that also use OPENAI_API_KEY down-stream
+
+# ─── type helpers ─────────────────────────────────────────────────────────────
 SPLIT_MODE = Literal["para", "sent"]
-_PREFERRED = ["content", "body", "text", "chapter"]     # all lowercase
 
-_HTML_P   = re.compile(r"<\s*(p|br)[^>]*>", re.I)       # <p>, <br>, variants
+# ─── constants & regexes ──────────────────────────────────────────────────────
+_PREFERRED = ["content", "body", "text", "chapter"]  # canonical field names
+_SENTENCE_END = (
+    r"(?<!\b[A-Z]\.)(?<!\b[eE][gG]\.)(?<!\b[iI][eE]\.)"  # ignore initials / i.e.
+    r"(?<=[.!?！？])\s+"                                  # real sentence end
+)
 _HTML_TAG = re.compile(r"<[^>]+>")
+_HTML_P   = re.compile(r"<\s*(p|br)[^>]*>", re.I)
 _CREDIT   = re.compile(r"(translator|editor)\s*:", re.I)
 
-# ────────────────────────────────────────────────────────────────
-# Loading & normalisation helpers
-# ────────────────────────────────────────────────────────────────
-def load_text(path: Path) -> str:
-    """
-    Return plain text from either a .txt file or a crawler .json bundle.
-    – Removes UTF-8 BOM.
-    – Accepts any reasonable field name (see _PREFERRED).
-    """
 
-    text_decoded = path.read_bytes().lstrip(b"\xef\xbb\xbf").decode("utf-8")
+# ──────────────────────────────────────────────────────────────────────────────
+# HTML + Unicode cleaning helpers
+# ──────────────────────────────────────────────────────────────────────────────
+def strip_html(raw: str) -> str:
+    """Unescape entities, preserve paragraph breaks, drop credits, fix mojibake."""
+    import html
 
-    if path.suffix.lower() != ".json":
-        return text_decoded
-
-    data = json.loads(text_decoded)
-    if not isinstance(data, list):
-        data = data.get("chapters", [])         # older crawler format
-
-    def clean(raw: str) -> str:
-        return fix_text(strip_html(raw))
-
-    def extract(ch: dict) -> str | None:
-        # case-fold keys once
-        for key, val in ((k.lower(), v) for k, v in ch.items()):
-            if key in _PREFERRED and isinstance(val, str) and val.strip():
-                return strip_html(val)
-
-        # fallback: first string value > 20 chars
-        for val in ch.values():
-            if isinstance(val, str) and len(val.strip()) > 20:
-                return strip_html(val)
-
-        return None
-
-    pieces: list[str] = [
-        cleaned for ch in data if isinstance(ch, dict)
-        for cleaned in [extract(ch)] if cleaned
-    ]
-
-    if not pieces:
-        first_keys = list(data[0].keys()) if data else []
-        raise ValueError(
-            f"No prose found – check JSON keys inside {path.name}. "
-            f"First object keys: {first_keys}"
-        )
-
-    return "\n\n".join(pieces)
+    s = html.unescape(raw)
+    s = _HTML_P.sub("\n\n", s)          # keep structure for para split
+    s = _HTML_TAG.sub("", s)
+    s = "\n".join(l for l in s.splitlines() if not _CREDIT.search(l))
+    return fix_text(s)
 
 
 def normalise(text: str) -> str:
-    """Unify Unicode, CRLF, and nbsp."""
-    text = text.replace("\r\n", "\n").replace("\u00A0", " ")
-    return unicodedata.normalize("NFKC", text)
+    """CRLF→LF, nbsp→space, NFKC."""
+    return unicodedata.normalize("NFKC",
+                                 text.replace("\r\n", "\n").replace("\u00A0", " "))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Loader (BOM-safe, JSON aware)
+# ──────────────────────────────────────────────────────────────────────────────
+def load_text(path: Path) -> str:
+    """Return plain text from .txt or crawler .json."""
+    raw_bytes = path.read_bytes().lstrip(b"\xef\xbb\xbf")  # strip UTF-8 BOM
+    if path.suffix.lower() != ".json":
+        return raw_bytes.decode("utf-8")
+
+    data = json.loads(raw_bytes.decode("utf-8"))
+
+    if not isinstance(data, list):
+        data = data.get("chapters", [])
+
+    blocks: List[str] = []
+    for ch in data:
+        if not isinstance(ch, dict):
+            continue
+        for k in _PREFERRED:
+            if k in ch and isinstance(ch[k], str):
+                blocks.append(ch[k])
+                break
+        else:
+            # fallback first long string
+            for v in ch.values():
+                if isinstance(v, str) and len(v) > 20:
+                    blocks.append(v)
+                    break
+
+    join = "\n\n".join(strip_html(b) for b in blocks)
+    if not join.strip():
+        raise ValueError(f"No prose found in {path.name}")
+    return normalise(join)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Splitters
 # ──────────────────────────────────────────────────────────────────────────────
-_SENTENCE_END = (
-    r"(?<!\b[A-Z]\.)(?<!\b[eE][gG]\.)(?<!\b[iI][eE]\.)"  # ignore initials/abbrev.
-    r"(?<=[.!?！？])\s+"                                  # real sentence end → space
-)
-
-
 def split_paragraphs(text: str) -> List[str]:
-    """
-    Split on one + blank line(s) – works whether paragraphs are separated
-    by '\n', '\n\n', or '\r\n   \r\n'.  Strips leading/trailing whitespace.
-    """
-    paras = re.split(r"\r?\n\s*\r?\n", text)   # ← key change
-    return [p.strip() for p in paras if p.strip()]
+    return [p.strip() for p in re.split(r"\r?\n\s*\r?\n", text) if p.strip()]
+
 
 def split_sentences(text: str) -> List[str]:
     return [s.strip() for s in re.split(_SENTENCE_END, text) if s.strip()]
 
 
 def filter_short(units: List[str], min_len: int = 4) -> List[str]:
-    """Drop stray artefacts (***, —, etc.)."""
     return [u for u in units if len(u) >= min_len]
 
 
-def strip_html(raw: str) -> str:
-    """Unescape HTML, keep paragraph structure, drop credit lines, fix mojibake."""
-    # 1) normalise &nbsp; &#39; etc.
-    s = html.unescape(raw)
-    # 2) turn any <p> / <br> into two newlines so split_paragraphs() can see them
-    s = _HTML_P.sub("\n\n", s)
-    # 3) strip all remaining tags
-    s = _HTML_TAG.sub("", s)
-    # 4) remove translator/editor credit lines
-    s = "\n".join(line for line in s.splitlines() if not _CREDIT.search(line))
-    # 5) ftfy to repair mojibake (â€™ → ’, etc.)
-    return fix_text(s)
-
 # ──────────────────────────────────────────────────────────────────────────────
-# Core logic
+# Core segmenter for one file
 # ──────────────────────────────────────────────────────────────────────────────
 def segment_file(
     path: Path,
@@ -145,56 +132,10 @@ def segment_file(
     mode: SPLIT_MODE,
     csv_writer: csv.writer | None = None,
 ) -> None:
-    """
-    Segment one .txt or .json file.
-    • If it's a crawler JSON bundle, show an inner tqdm bar per chapter.
-    • Otherwise, treat it as plain text.
-    """
-
-    chapter_tag = path.stem                    # e.g. lotm_full or lotm_0001-0100
+    chapter_tag = path.stem  # lotm_0001 or lotm_full
     dest.mkdir(parents=True, exist_ok=True)
 
-    # ─── Case A: crawler JSON bundle with many chapters ────────────────────
-    if path.suffix.lower() == ".json":
-        raw_bytes   = path.read_bytes()
-        text_dec    = raw_bytes.lstrip(b"\xef\xbb\xbf").decode("utf-8")
-        data = json.loads(text_dec)
-        if not isinstance(data, list):
-            data = data.get("chapters", [])
-
-        # tqdm for big bundles (threshold 50 chapters)
-        chap_iter = (
-            tqdm(data, desc=chapter_tag, unit="chap", leave=False)
-            if len(data) > 50 else data
-        )
-
-        _PREFERRED = ["content", "body", "text", "chapter"]  # already defined earlier
-
-        def clean_html(raw: str) -> str:
-            return strip_html(raw)  # uses your existing strip_html + ftfy
-
-        def extract(ch: dict) -> str | None:
-            # 1) preferred keys
-            for k, v in ((k.lower(), v) for k, v in ch.items()):
-                if k in _PREFERRED and isinstance(v, str) and v.strip():
-                    return clean_html(v)
-            # 2) fallback first long string
-            for v in ch.values():
-                if isinstance(v, str) and len(v.strip()) > 20:
-                    return clean_html(v)
-            return None
-
-        pieces: list[str] = [
-            txt for ch in chap_iter if isinstance(ch, dict)
-            for txt in [extract(ch)] if txt
-        ]
-        raw_text = normalise("\n\n".join(pieces))
-
-    # ─── Case B: plain .txt (or already-clean JSON handled by load_text) ───
-    else:
-        raw_text = normalise(load_text(path))
-
-    # ─── Split & write out segments ────────────────────────────────────────
+    raw_text = load_text(path)
     splitter = split_sentences if mode == "sent" else split_paragraphs
     units = filter_short(splitter(raw_text))
 
@@ -207,7 +148,28 @@ def segment_file(
     print(f"{path.name}: {len(units)} segments")
 
 
-# Gather candidate files (single path or folder walk)
+# ──────────────────────────────────────────────────────────────────────────────
+# Chapter-split helper (mega-JSON → per-chapter JSON)
+# ──────────────────────────────────────────────────────────────────────────────
+def split_into_chapters(src: Path, dest_dir: Path) -> List[Path]:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    raw = src.read_bytes().lstrip(b"\xef\xbb\xbf")
+    data = json.loads(raw.decode("utf-8"))
+    if not isinstance(data, list):
+        raise ValueError("Mega-JSON must be a list of chapter dicts")
+
+    out_files: List[Path] = []
+    for idx, ch in enumerate(data, start=1):
+        out = dest_dir / f"lotm_{idx:04d}.json"
+        out.write_text(json.dumps([ch], ensure_ascii=False), encoding="utf-8")
+        out_files.append(out)
+    print(f"✂ Split {src.name} → {len(out_files)} chapter files in {dest_dir}")
+    return out_files
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File iterator
+# ──────────────────────────────────────────────────────────────────────────────
 def iter_files(root: Path, recursive: bool) -> Iterable[Path]:
     if root.is_file():
         yield root
@@ -219,11 +181,12 @@ def iter_files(root: Path, recursive: bool) -> Iterable[Path]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# CLI entry-point
+# CLI
 # ──────────────────────────────────────────────────────────────────────────────
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Segment chapters for ProseForge.")
-    parser.add_argument("--in", dest="inp", type=Path, required=True,
+    parser = argparse.ArgumentParser(description="Segment novels for ProseForge.")
+
+    parser.add_argument("--in", dest="src", type=Path, required=True,
                         help="Source file or folder (.txt / .json).")
     parser.add_argument("--out", type=Path, required=True,
                         help="Destination folder for segment files.")
@@ -233,22 +196,42 @@ def main() -> None:
                         help="Optional CSV summary (seg_id,text).")
     parser.add_argument("--recursive", action="store_true",
                         help="Recurse into sub-directories when --in is a folder.")
+
+    # new splitting flags
+    parser.add_argument("--split-per-chapter", action="store_true",
+                        help="If --in is a mega-JSON, slice into per-chapter JSON "
+                             "files under --chapters-out.")
+    parser.add_argument("--chapters-out", type=Path, default=Path("data/raw/chapters"),
+                        help="Directory to write per-chapter JSON when splitting.")
+    parser.add_argument("--no-segments", action="store_true",
+                        help="With --split-per-chapter: only write JSON, skip segmenting.")
+
     args = parser.parse_args()
 
-    csv_file: TextIO | None = None
-    csv_writer: csv.writer | None = None
+    # ─── handle mega-JSON split first ────────────────────────────────────────
+    if args.split_per_chapter:
+        chapter_files = split_into_chapters(args.src, args.chapters_out)
+        if args.no_segments:
+            print("✔ Split complete – skipping segmentation (--no-segments).")
+            return
+        files_to_process = chapter_files
+    else:
+        files_to_process = list(iter_files(args.src, args.recursive))
+
+    # ─── CSV setup ───────────────────────────────────────────────────────────
+    csv_file = None
+    csv_writer = None
+    if args.csv:
+        args.csv.parent.mkdir(parents=True, exist_ok=True)
+        csv_file = args.csv.open("w", encoding="utf-8", newline="")
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(["seg_id", "text"])
+
+    # ─── segment loop with progress bar ──────────────────────────────────────
+    iterable = tqdm(files_to_process, desc="Segmenting", unit="file") \
+               if len(files_to_process) > 1 else files_to_process
+
     try:
-        if args.csv:
-            args.csv.parent.mkdir(parents=True, exist_ok=True)
-            csv_file = args.csv.open("w", encoding="utf-8", newline="")
-            csv_writer = csv.writer(csv_file)
-            csv_writer.writerow(["seg_id", "text"])
-
-        files = list(iter_files(args.inp, args.recursive))   # materialise once
-
-        # Only show tqdm when there's more than one file
-        iterable = tqdm(files, desc="Segmenting", unit="file") if len(files) > 1 else files
-
         for file in iterable:
             segment_file(file, args.out, args.mode, csv_writer)
     except Exception as exc:  # pragma: no cover

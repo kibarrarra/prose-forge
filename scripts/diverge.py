@@ -33,6 +33,13 @@ except ImportError:                                    # noqa: D401
 import openai, yaml
 from ftfy import fix_text
 
+client = OpenAI(
+    # keep OpenAI’s automatic 2 retries, just stretch the handshake window
+    timeout=httpx.Timeout(
+        connect=30.0,   # ⬅️ give DNS+TCP up to 30 s
+        read=600.0,     # leave the 10-min read cap (or bump if you want)
+    )
+)
 # ─── folder constants ─────────────────────────────────────────────────────────
 RAW_DIR    = pathlib.Path("data/raw/chapters")
 SEG_DIR    = pathlib.Path("data/segments")
@@ -118,7 +125,7 @@ def ask_llm(style_delta: str, temp: float, chapter_txt: str) -> str:
         {"role": "system", "content": SYSTEM_BASE.format(delta=style_delta)},
         {"role": "user",   "content": chapter_txt},
     ]
-    resp = openai.ChatCompletion.create(
+    resp = client.chat.completions.create(
         model="gpt-4o",
         temperature=temp,
         messages=msg,
@@ -173,7 +180,6 @@ def resolve_input(arg: str) -> pathlib.Path:
 
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    openai.api_key = os.getenv("OPENAI_API_KEY")
     parser = argparse.ArgumentParser()
     parser.add_argument("input", help="chapter id (lotm_0001) or path to JSON/TXT")
     diverge(resolve_input(parser.parse_args().input))

@@ -11,6 +11,8 @@ Usage:  python scripts/polish.py lotm_0001  [--segdir data/segments]
 
 import argparse, pathlib, openai, textwrap, os, tqdm
 
+client = openai.OpenAI()
+
 PROMPT = textwrap.dedent("""\
     Full chapter context (do NOT rewrite):
     —
@@ -26,7 +28,7 @@ PROMPT = textwrap.dedent("""\
 """)
 
 def polish_para(chapter_ctx: str, para_text: str) -> str:
-    r = openai.ChatCompletion.create(
+    r = client.chat.completions.create(
         model="gpt-4o",
         temperature=0.2,
         messages=[{"role": "user",
