@@ -30,16 +30,18 @@ try:
 except ImportError:                                    # noqa: D401
     tqdm = lambda x, **kw: x                           # type: ignore
 
-import openai, yaml
+import httpx
+from openai import OpenAI
+import yaml
 from ftfy import fix_text
 
 client = OpenAI(
-    # keep OpenAI’s automatic 2 retries, just stretch the handshake window
     timeout=httpx.Timeout(
-        connect=30.0,   # ⬅️ give DNS+TCP up to 30 s
-        read=600.0,     # leave the 10-min read cap (or bump if you want)
+        connect=30.0,   # give DNS+TCP up to 30 s
+        read=600.0,
     )
 )
+
 # ─── folder constants ─────────────────────────────────────────────────────────
 RAW_DIR    = pathlib.Path("data/raw/chapters")
 SEG_DIR    = pathlib.Path("data/segments")
@@ -48,7 +50,7 @@ DRAFT_ROOT = pathlib.Path("drafts")
 
 # ─── import helpers from your segment script (HTML strip + unicode normalise) ─
 try:
-    from scripts.segment import strip_html, normalise  # type: ignore
+    from scripts.segment_chapters import strip_html, normalise  # type: ignore
 except ImportError:
     # Fallback ultra-light cleaners (won’t be as robust but prevents crash)
     import html, re, unicodedata

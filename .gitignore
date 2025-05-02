@@ -14,3 +14,7 @@ models/
 
 # Jupyter notebooks checkpoints
 **/.ipynb_checkpoints/
+
+# ── generated output ───────────────────────────────
+drafts/
+segments/
