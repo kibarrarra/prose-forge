@@ -1,4 +1,16 @@
 #!/usr/bin/env python
+
+# --- DEBUGGING BLOCK ---
+# import sys
+# import os
+# print(f"--- DEBUG: writer.py starting ---", file=sys.stderr)
+# print(f"CWD: {os.getcwd()}", file=sys.stderr)
+# print(f"sys.path: {sys.path}", file=sys.stderr)
+# print(f"-------------------------------", file=sys.stderr)
+# --- END DEBUGGING BLOCK ---
+
+from __future__ import annotations
+
 """
 writer.py - Create or revise a chapter draft according to voice_spec.md.
 
@@ -9,13 +21,14 @@ Core modes
 3. Revision pass          $ writer.py lotm_0006 --revise notes/lotm_0006.json
 """
 
-from __future__ import annotations
 import argparse, json, math, pathlib, re, sys, textwrap
 from utils.paths import RAW_DIR, SEG_DIR, CTX_DIR, DRAFT_DIR, CONFIG_DIR
 from typing import Optional, TypedDict
 from utils.io_helpers import read_utf8, write_utf8
-from utils.openai_client import get_openai_client
+from utils.llm_client import get_llm_client
 from ftfy import fix_text
+import os
+import time
 
 
 # ── logging setup ────────────────────────────────────────────
@@ -31,7 +44,7 @@ OUT  = DRAFT_DIR
 CFG  = CONFIG_DIR
 
 # ── OpenAI client ────────────────────────────────────────────────────────────
-client = get_openai_client()
+client = get_llm_client()
 
 # ── utilities ────────────────────────────────────────────────────────────────
 def die(msg: str) -> None:
@@ -50,6 +63,36 @@ def normalise(text: str) -> str:
 def estimate_max_tokens(words: int, factor: float = 1.4) -> int:
     """1 token ≈ 0.75 words → pad by factor."""
     return max(1024, min(int(words / 0.75 * factor), 8192))
+
+# ── raw ending extractor (≈60 words) ─────────────────────────────────────────
+
+def extract_raw_ending(chap_id: str) -> str | None:
+    """Return last ≈60 words from the canonical raw text for *chap_id*, or
+    None if raw text not found.  This is used during revision passes to make
+    sure the ending narrative beat remains aligned with the original source.
+    """
+    # Prefer JSON if available, then segments, then context plain text.
+    json_path = RAW / f"{chap_id}.json"
+    if json_path.exists():
+        raw_text, _ = load_raw_text(json_path)
+        return " ".join(raw_text.split()[-60:])
+
+    # Segments or context
+    segs = sorted(SEG.glob(f"{chap_id}_p*.txt"))
+    if segs:
+        raw_text = "\n\n".join(read_utf8(p) for p in segs)
+    else:
+        ctx_path = CTX / f"{chap_id}.txt"
+        if not ctx_path.exists():
+            return None
+        raw_text = read_utf8(ctx_path)
+
+    return " ".join(raw_text.split()[-60:])
+
+def segment_text(text: str, chunk_words: int = 250) -> list[str]:
+    words = text.split()
+    return [" ".join(words[i:i+chunk_words])
+            for i in range(0, len(words), chunk_words)]
 
 # ── load raw source text ─────────────────────────────────────────────────────
 def resolve_chapter(arg: str) -> pathlib.Path:
@@ -99,7 +142,6 @@ def load_raw_text(path: pathlib.Path) -> tuple[str, str]:
 # ── prompt builders ─────────────────────────────────────────────────────────
 def build_author_prompt(source: str, voice_spec: str, length_hint: str,
                         prev_final: Optional[str], persona: Optional[str],
-                        critic_feedback: Optional[dict] = None,
                         include_raw: bool = True,
                         raw_ending: str | None = None) -> list[dict]:
     """Compose prompt for the LLM.
@@ -124,17 +166,6 @@ def build_author_prompt(source: str, voice_spec: str, length_hint: str,
         user_parts.append(f"RAW SOURCE:\n{source}")
     if prev_final:
         user_parts.append(f"PREVIOUS FINAL CHAPTER:\n{prev_final}")
-    if critic_feedback:
-        user_parts.append(textwrap.dedent(f"""\
-            CRITIC FEEDBACK:
-            ---------------
-            Critic A: {critic_feedback.get('critic_A_summary', '')}
-            Critic B: {critic_feedback.get('critic_B_summary', '')}
-
-            Discussion: {critic_feedback.get('discussion_transcript', '')}
-
-            Please incorporate the key insights from this feedback into your writing.
-            """))
 
     # Always provide raw ending discipline snippet so model mirrors exact beat
     if raw_ending:
@@ -143,43 +174,155 @@ def build_author_prompt(source: str, voice_spec: str, length_hint: str,
             ---------------------------
             {raw_ending}
 
-            Your final sentence must conclude on the *same narrative beat*.
-            Absolutely forbid introduction of foreshadowing or closure that is
-            absent in the RAW ENDING.
+            Do NOT add any interpretation, foreshadowing, or sense of closure
+            that is absent in the RAW ENDING. Maintain its exact tone and
+            level of uncertainty or suspense.
             """))
+
+    # ────────────────────────────────────────────────────
+    # SELF-CHECK to catch hallucinations / new elements
+    # ────────────────────────────────────────────────────
+    user_parts.append(textwrap.dedent("""\
+        SELF-CHECK:
+        List, in bullet form, any line that introduces a new object, event, or
+        future plan that was not present in the RAW. Then rewrite the draft to
+        remove them.  Return the revised draft only—no extra commentary or labels.
+        **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
+        """))
 
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": "\n\n".join(user_parts)}
     ]
 
-def build_revision_prompt(current: str, notes: dict,
-                          voice_spec: str) -> list[dict]:
+def build_segment_author_prompt(raw_segments: list[str],
+                                voice_spec: str,
+                                length_hint: str,
+                                persona: str | None,
+                                raw_ending: str) -> list[dict]:
+    persona_note = f" as {persona}" if persona else ""
+    system = f"""You are 'Chapter-Author'{persona_note}.
+Follow the voice spec. {length_hint}
+You will rewrite the RAW text **segment by segment**, keeping each segment's
+word-count within ±10 %. Do NOT cut segments or merge them.
+
+VOICE SPEC
+----------
+{voice_spec}
+"""
+
+    # assemble labelled segments
+    labelled = []
+    for idx, seg in enumerate(raw_segments, 1):
+        labelled.append(f"[S{idx}]\n{seg}")
+
+    user = f"""RAW SEGMENTS ({len(raw_segments)} total)
++---------------------------------------
++{'\n\n'.join(labelled)}
+
+RAW ENDING (last ≈60 w)
++-----------------------
++{raw_ending}
+
+INSTRUCTIONS
+1. Work in order S1 → S{len(raw_segments)}.
+   • Rewrite each segment; do not skip or shorten it significantly (target ±10% words).
+   • If a segment is already clear, you may keep sentences verbatim.
+2. Preserve every plot beat and all factual details.
+3. After all segments, perform a SELF-CHECK:
+   – If total words are <90 % or >110 % of RAW, expand/trim accordingly.
+   – Ensure the final sentence ends on **the identical narrative beat** shown
+     in RAW ENDING (no extra closure or foreshadowing).
+4. Output the full chapter with *no segment labels* and no commentary.
+   **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
+"""
+
+    return [{"role": "system", "content": system},
+            {"role": "user",   "content": user}]
+
+def build_revision_prompt(current: str, change_list: dict, voice_spec: str, raw_ending: str | None = None) -> list[dict]:
     system = textwrap.dedent(f"""\
-        You are the same 'Chapter-Author'. Apply ONLY the changes requested.
+        You are the same 'Chapter-Author'.
+        You MUST apply every change listed under "must" exactly as specified—no omissions.
+        You MAY apply changes under "nice" if they genuinely improve clarity, mood, or pacing.
+        Do NOT introduce new plot points, foreshadowing, or factual inconsistencies outside the RAW ending beat.
         ---
         VOICE SPEC
         ----------
         {voice_spec}
         """)
-    user = textwrap.dedent(f"""\
-        CURRENT DRAFT:
+
+    user_parts = [textwrap.dedent(f"""\
+        PREVIOUS DRAFT:
         {current}
 
         CHANGE LIST (JSON):
-        {json.dumps(notes, indent=2, ensure_ascii=False)}
-        """)
+        {json.dumps(change_list, indent=2, ensure_ascii=False)}
+        """)]
+
+    if raw_ending:
+        user_parts.append(textwrap.dedent(f"""\
+            RAW ENDING (last ≈60 words):
+            ---------------------------
+            {raw_ending}
+
+            Do NOT add any interpretation, foreshadowing, or sense of closure
+            that is absent in the RAW ENDING. Maintain its exact tone and
+            level of uncertainty or suspense.
+            """))
+
+    # ────────────────────────────────────────────────────
+    # SELF-CHECK to ensure MUST edits & no hallucinations
+    # ────────────────────────────────────────────────────
+    user_parts.append(textwrap.dedent("""\
+        SELF-CHECK:
+        1. List, in bullet form, any MUST item that remains unimplemented.
+        2. List any new object, event, or future plan that was not present in the PREVIOUS DRAFT.
+        Then rewrite the draft to fix these issues.  Return FINAL only—no extra commentary or labels.
+        **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
+        """))
+
+    user = "\n\n".join(user_parts)
+
     return [{"role": "system", "content": system},
             {"role": "user",   "content": user}]
 
-def call_llm(msgs: list[dict], temp: float, max_tokens: int) -> str:
-    res = client.chat.completions.create(
-        model="gpt-4o",
-        temperature=temp,
-        messages=msgs,
-        max_tokens=max_tokens
-    )
-    return res.choices[0].message.content.strip()
+def call_llm(msgs: list[dict], temp: float, max_tokens: int, model: str) -> str:
+    MAX_RETRIES = 3
+    INITIAL_DELAY_SECS = 1
+
+    delay = INITIAL_DELAY_SECS
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            res = client.chat.completions.create(
+                model=model,
+                temperature=temp,
+                messages=msgs,
+                max_tokens=max_tokens
+            )
+            # If we get here, API call succeeded - try to parse response
+            try:
+                return res.choices[0].message.content.strip()
+            except Exception as e:
+                # Don't retry on response parsing errors
+                log.error("Failed to parse LLM response: %s", e)
+                raise
+                
+        except Exception as e:
+            last_error = e
+            if attempt == MAX_RETRIES - 1:
+                log.error("Max retries reached for LLM call.")
+                raise last_error
+            
+            # Log warning with attempt number and specific error
+            log.warning("LLM call failed (attempt %d/%d), retrying in %d s: %s", 
+                        attempt + 1, MAX_RETRIES, delay, e)
+            time.sleep(delay)
+            delay *= 2  # Exponential backoff
+
+    # Should not be reached if MAX_RETRIES > 0, but satisfies type checker
+    raise RuntimeError("LLM call failed after multiple retries")
 
 # ── filename helpers ────────────────────────────────────────────────────────
 def draft_name(persona: str, sample: bool, version: int) -> str:
@@ -195,7 +338,7 @@ def latest_version(folder: DIR, persona: str, sample: bool) -> int:
 
 # ── main actions ────────────────────────────────────────────────────────────
 def make_first_draft(text: str, chap_id: str, args, voice_spec: str,
-                     prev_final: Optional[str], critic_feedback: Optional[dict] = None) -> pathlib.Path:
+                     prev_final: Optional[str]) -> pathlib.Path:
     # sample truncation
     if args.sample:
         text = " ".join(text.split()[: args.sample])
@@ -212,11 +355,24 @@ def make_first_draft(text: str, chap_id: str, args, voice_spec: str,
     # extract raw ending ~60 words
     raw_ending = " ".join(text.split()[-60:]) if include_raw else None
 
-    prompt = build_author_prompt(text, voice_spec, length_hint,
-                                 prev_final, args.persona, critic_feedback,
-                                 include_raw=include_raw,
-                                 raw_ending=raw_ending)
-    draft = call_llm(prompt, temp=0.7, max_tokens=max_toks)
+    # Determine prompt based on whether segmented drafting is enabled
+    if args.segmented_first_draft:
+        raw_segs = segment_text(text, args.chunk_size or 250)
+        # Ensure raw_ending is extracted from the full original text
+        raw_ending_full = " ".join(text.split()[-60:])
+        prompt = build_segment_author_prompt(raw_segs,
+                                             voice_spec,
+                                             length_hint,
+                                             args.persona,
+                                             raw_ending_full)
+    else:
+        # Standard author prompt (uses raw_ending extracted earlier)
+        prompt = build_author_prompt(text, voice_spec, length_hint,
+                                     prev_final, args.persona,
+                                     include_raw=include_raw,
+                                     raw_ending=raw_ending)
+
+    draft = call_llm(prompt, temp=0.5, max_tokens=max_toks, model=args.model)
 
     # For auditions, write to the audition directory
     if args.audition_dir:
@@ -234,24 +390,46 @@ def make_first_draft(text: str, chap_id: str, args, voice_spec: str,
     return path
 
 def make_revision(chap_id: str, args, voice_spec: str) -> pathlib.Path:
-    notes = json.loads(read_utf8(args.revise))
-    if not any(k in notes for k in ("rewrite", "cut", "keep")):
-        die("Revision notes must have at least 'rewrite', 'cut' or 'keep'.")
+    if not args.critic_feedback or not args.critic_feedback.exists():
+        die("Revision mode requires --critic-feedback JSON file produced by editor_panel.")
 
-    folder = OUT / chap_id
-    v_now  = latest_version(folder, args.persona, bool(args.sample))
-    if v_now == 0:
-        die("No existing draft to revise.")
+    feedback = json.loads(read_utf8(args.critic_feedback))
+    change_list = feedback.get("change_list", {})
+    if not change_list.get("must") and not change_list.get("nice"):
+        die("Change list missing or empty 'must' edits.")
 
-    current = read_utf8(folder / draft_name(args.persona, bool(args.sample), v_now))
+    # Determine where the drafts are stored. If audition_dir is provided we
+    # operate in-place inside that folder, otherwise use the standard
+    # chapter directory under DRAFT_DIR.
+    if args.audition_dir:
+        folder = args.audition_dir
+        # In audition mode, the 'current' text comes from the --prev argument's file.
+        if not args.prev or not args.prev.exists():
+            die(f"Revision in audition mode requires a valid --prev file. Not found: {args.prev}")
+        current = read_utf8(args.prev)
+        current_path = folder / f"{chap_id}.txt" # This is the *output* path
+    else:
+        folder = OUT / chap_id
+        v_now  = latest_version(folder, args.persona, bool(args.sample))
+        if v_now == 0:
+            die("No existing draft to revise.")
+        current_path = folder / draft_name(args.persona, bool(args.sample), v_now)
+        current = read_utf8(current_path)
+
+    raw_ending = extract_raw_ending(chap_id)
     max_toks = estimate_max_tokens(len(current.split()))
-    prompt = build_revision_prompt(current, notes, voice_spec)
-    new_draft = call_llm(prompt, temp=0.4, max_tokens=max_toks)
+    prompt = build_revision_prompt(current, change_list, voice_spec, raw_ending)
+    new_draft = call_llm(prompt, temp=0.2, max_tokens=max_toks, model=args.model)
 
-    fname = draft_name(args.persona, bool(args.sample), v_now + 1)
-    path  = folder / fname
-    write_utf8(path, new_draft)
-    return path
+    if args.audition_dir:
+        # Overwrite the file directly for audition mode
+        write_utf8(current_path, new_draft)
+        return current_path
+    else:
+        fname = draft_name(args.persona, bool(args.sample), v_now + 1)
+        path  = folder / fname
+        write_utf8(path, new_draft)
+        return path
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
@@ -265,12 +443,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--target-words", type=int)
     p.add_argument("--target-ratio", type=float, default=1.0)
     p.add_argument("--prev", type=DIR, help="Previous locked chapter")
-    p.add_argument("--revise", type=DIR,
-                   help="JSON notes file from critic/auditor")
     p.add_argument("--audition-dir", type=DIR,
                    help="Directory for audition drafts (e.g. drafts/auditions/persona_1)")
     p.add_argument("--critic-feedback", type=DIR,
                    help="JSON file containing critic feedback for final version")
+    p.add_argument("--model", type=str, default=os.getenv("WRITER_MODEL", "claude-3-opus-20240229"),
+                   help="LLM model name to use (e.g. gpt-4o, claude-3-opus-20240229)")
+    p.add_argument("--segmented-first-draft", action="store_true",
+                   help="Enable segmented first draft mode")
+    p.add_argument("--chunk-size", type=int,
+                   help="Chunk size for segmented first draft mode")
     return p.parse_args()
 
 def main() -> None:
@@ -286,16 +468,16 @@ def main() -> None:
 
     prev_final = read_utf8(args.prev) if args.prev and args.prev.exists() else None
     
-    # Load critic feedback if provided
-    critic_feedback = None
     if args.critic_feedback and args.critic_feedback.exists():
         critic_feedback = json.loads(read_utf8(args.critic_feedback))
+    else:
+        critic_feedback = None
 
-    if args.revise:
+    if args.critic_feedback:
         out = make_revision(chap_id, args, voice_spec)
         log.info("✔ revision → %s", out)
     else:
-        out = make_first_draft(raw_text, chap_id, args, voice_spec, prev_final, critic_feedback)
+        out = make_first_draft(raw_text, chap_id, args, voice_spec, prev_final)
         log.info("✔ draft → %s", out)
 
 if __name__ == "__main__":

@@ -6,14 +6,14 @@ This script performs N rounds of writing + critic feedback. Unlike
 `audition_iterative.py`, the `voice_spec.md` is updated by the critic panel
 output after each round, allowing the voice to evolve.
 
-Usage:
-    python scripts/audition_and_review.py cosmic_clarity 2  # persona name, chapters to write
 """
 
-import subprocess, shutil, json, pathlib, sys, os
-from utils.logging_helper import get_logger
-from utils.paths import CTX_DIR, VOICE_DIR, ROOT
-from utils.io_helpers import read_utf8, write_utf8, ensure_utf8_windows
+from __future__ import annotations
+
+import argparse, json, os, pathlib, shutil, subprocess, sys
+from scripts.utils.logging_helper import get_logger
+from scripts.utils.paths import CTX_DIR, VOICE_DIR, ROOT
+from scripts.utils.io_helpers import read_utf8, write_utf8, ensure_utf8_windows
 
 
 # ── logging & constants ────────────────────────────────────────────────────

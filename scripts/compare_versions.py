@@ -8,17 +8,17 @@ Usage:
 """
 
 import argparse, json, pathlib, textwrap, os
-from utils.io_helpers import read_utf8, write_utf8
-from utils.paths import ROOT, VOICE_DIR, CTX_DIR
+from utils.io_helpers import read_utf8
+from utils.paths import ROOT
 from utils.logging_helper import get_logger
-from utils.openai_client import get_openai_client
+from utils.llm_client import get_llm_client
 
 import tiktoken
 
 log = get_logger()
 MODEL = "gpt-4o-mini"   # cheap for discussion
 
-client = get_openai_client()
+client = get_llm_client()
 
 def load_version_text(version: str, chapter: str) -> tuple[str, str]:
     """Load chapter text and voice spec for a given version."""
@@ -69,19 +69,21 @@ def compare_versions(chapters: list[str], versions: list[str]) -> dict:
     
     # Get critic feedback
     rubric = textwrap.dedent("""
+        You are a literary reviewer.  Provide an *objective evaluation* **only**.
         Compare these versions on:
-        1. Clarity and readability (1-10)
-        2. Tone and atmosphere (1-10)
-        3. Consistency with voice spec (1-10)
-        4. Overall effectiveness (1-10)
+        1. Clarity and readability (1–10)
+        2. Tone and atmosphere (1–10)
+        3. Consistency with voice spec (1–10)
+        4. Overall effectiveness (1–10)
         
         For each version:
-        - Provide specific scores
-        - Highlight strengths and weaknesses
-        - Suggest improvements
-        - Note any particularly effective elements
+        - Give the four numeric scores above.
+        - Briefly justify each score (≤ 30 words).
+        - Highlight most effective elements (≤ 2 bullets).
         
-        End with a summary of which version works best overall and why.
+        Do not suggest concrete edits or improvements.  You are judging, not editing.
+        
+        Conclude with a summary paragraph naming which version works best overall and why.
     """)
     
     critic_A = chat("You are Critic A, focused on technical writing quality and clarity.", 

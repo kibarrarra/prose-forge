@@ -26,13 +26,14 @@ from __future__ import annotations
 
 import argparse, json, os, pathlib, shutil, subprocess, sys
 from utils.logging_helper import get_logger
-from utils.paths import ROOT, VOICE_DIR
+from utils.paths import ROOT, VOICE_DIR, CTX_DIR
 from utils.io_helpers import read_utf8, ensure_utf8_windows
 
 # ── logging & constants ────────────────────────────────────────────────────
 log = get_logger()
 WRITER = ROOT / "scripts" / "writer.py"
-CRITIC = ROOT / "scripts" / "critic_panel.py"
+EDITOR_PANEL = ROOT / "scripts" / "editor_panel.py"
+SANITY_CHECKER = ROOT / "scripts" / "sanity_checker.py"
 DEFAULT_ROUNDS = 2  # feedback iterations before the final pass
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -76,19 +77,72 @@ def call_writer(out_dir: pathlib.Path, persona: str, chapters: list[str],
             cmd += ["--critic-feedback", str(critic_feedback)]
 
         log.info("RUN: %s", " ".join(cmd))
-        subprocess.run(cmd, check=True, cwd=ROOT)
+
+        # Ensure the project root is on PYTHONPATH for the subprocess
+        env = os.environ.copy()
+        python_path = env.get("PYTHONPATH", "")
+        project_root_str = str(ROOT.resolve())
+        if project_root_str not in python_path.split(os.pathsep):
+            env["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{python_path}"
+
+        subprocess.run(cmd, check=True, cwd=ROOT, env=env)
 
 
-def run_critic(draft_dir: pathlib.Path, rnd: int) -> pathlib.Path:
-    """Run the critic panel for *draft_dir* and return the JSON manifest path."""
-    out_path = draft_dir / f"critic_round{rnd}.json"
-    cmd = [sys.executable, str(CRITIC),
+def run_editor(draft_dir: pathlib.Path, rnd: int) -> pathlib.Path:
+    """Run the editor panel for *draft_dir* and return the JSON manifest path."""
+    out_path = draft_dir / f"editor_round{rnd}.json"
+    cmd = [sys.executable, str(EDITOR_PANEL),
            "--draft-dir", str(draft_dir),
            "--round", str(rnd),
            "--output", str(out_path)]
     log.info("RUN: %s", " ".join(cmd))
     subprocess.run(cmd, check=True, cwd=ROOT)
     return out_path
+
+
+def run_sanity_check(prev_draft_dir: pathlib.Path, current_draft_dir: pathlib.Path,
+                     change_list_json: pathlib.Path, chapter: str) -> bool:
+    """Run sanity checker for a specific chapter and return True if OK."""
+    prev_draft_path = prev_draft_dir / f"{chapter}.txt"
+    new_draft_path = current_draft_dir / f"{chapter}.txt"
+    raw_context_path = CTX_DIR / f"{chapter}.txt"
+    status_path = current_draft_dir / f"{chapter}_sanity_status.txt"
+
+    if not prev_draft_path.exists():
+        log.warning(f"Sanity check skipped: Previous draft missing {prev_draft_path}")
+        return True # Cannot check, assume OK for workflow
+    if not new_draft_path.exists():
+        log.warning(f"Sanity check skipped: New draft missing {new_draft_path}")
+        return False # Revision failed
+    if not change_list_json.exists():
+        log.warning(f"Sanity check skipped: Change list missing {change_list_json}")
+        return False # Cannot check without changes
+
+    cmd = [sys.executable, str(SANITY_CHECKER),
+           "--prev-draft", str(prev_draft_path),
+           "--new-draft", str(new_draft_path),
+           "--change-list-json", str(change_list_json),
+           "--output-status", str(status_path)]
+
+    if raw_context_path.exists():
+        cmd += ["--raw-context", str(raw_context_path)]
+    else:
+        log.warning(f"Raw context not found for sanity check: {raw_context_path}")
+
+    log.info("RUN Sanity Check: %s", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True, cwd=ROOT, capture_output=True, text=True)
+        # Read the verdict
+        if status_path.exists():
+            verdict = read_utf8(status_path).strip()
+            log.info(f"Sanity check verdict for {chapter}: {verdict}")
+            return verdict == "OK"
+        else:
+            log.warning(f"Sanity check status file missing: {status_path}")
+            return False
+    except subprocess.CalledProcessError as e:
+        log.error(f"Sanity check failed for {chapter}:\n{e.stderr}")
+        return False
 
 
 def create_final_version(persona: str, chapters: list[str],
@@ -106,20 +160,38 @@ def create_final_version(persona: str, chapters: list[str],
     # Find the last round number from last_round_dir
     last_round_name = last_round_dir.name  # should be 'round_N'
     last_round_num = last_round_name.split('_')[-1]
-    last_critic_json = last_round_dir / f"critic_round{last_round_num}.json"
-    if not last_critic_json.exists():
-        raise FileNotFoundError(last_critic_json)
-    shutil.copy(last_critic_json, final_dir / "critic_feedback.json")
+    last_editor_json = last_round_dir / f"editor_round{last_round_num}.json"
+    if not last_editor_json.exists():
+        raise FileNotFoundError(last_editor_json)
+    shutil.copy(last_editor_json, final_dir / "critic_feedback.json")
 
-    # 3) run writer with the feedback
+    # 3) copy last-round drafts into final_dir as the starting point so that
+    #    writer.py (in revision mode) can perform an in-place update.
     for ch in chapters:
+        src_draft = last_round_dir / f"{ch}.txt"
+        if not src_draft.exists():
+            raise FileNotFoundError(src_draft)
+        shutil.copy(src_draft, final_dir / f"{ch}.txt")
+
+    # 4) run writer with the feedback to perform the final revision in-place
+    for ch in chapters:
+        prev_draft_path = final_dir / f"{ch}.txt" # The draft copied in step 3
         cmd = [sys.executable, str(WRITER), ch,
                "--persona", persona,
                "--spec", str(final_dir / "voice_spec.md"),
                "--audition-dir", str(final_dir),
-               "--critic-feedback", str(final_dir / "critic_feedback.json")]
-        log.info("RUN: %s", " ".join(cmd))
+               "--critic-feedback", str(final_dir / "critic_feedback.json"),
+               "--prev", str(prev_draft_path)] # Add the mandatory --prev arg
+        log.info("RUN Final Writer: %s", " ".join(cmd))
         subprocess.run(cmd, check=True, cwd=ROOT)
+
+        # Run sanity check on the final revised draft
+        run_sanity_check(
+            prev_draft_dir=last_round_dir, # Drafts were copied from here
+            current_draft_dir=final_dir,
+            change_list_json=final_dir / "critic_feedback.json",
+            chapter=ch
+        )
 
     log.info("Final drafts created in %s", final_dir)
 
@@ -140,7 +212,7 @@ def main() -> None:
     chapters = [f"lotm_{i:04d}" for i in range(1, num_chaps + 1)]
     rounds = max(1, args.rounds)
 
-    previous_critic_json: pathlib.Path | None = None
+    previous_editor_json: pathlib.Path | None = None
     last_round_dir: pathlib.Path | None = None
 
     for rnd in range(1, rounds + 1):
@@ -152,14 +224,24 @@ def main() -> None:
 
         # run writer with previous round drafts and any critic feedback
         call_writer(spec_dir, persona, chapters, spec_path,
-                    previous_critic_json, last_round_dir)
+                    previous_editor_json, last_round_dir)
 
-        # run critic panel for the drafts just created
-        critic_json = run_critic(spec_dir, rnd)
-        log.info("Critic feedback saved → %s", critic_json)
+        # run editor panel for the drafts just created
+        editor_json = run_editor(spec_dir, rnd)
+        log.info("Editor feedback saved → %s", editor_json)
+
+        # Run sanity check for each chapter revised in this round
+        if last_round_dir and previous_editor_json:
+            log.info(f"Running sanity checks for round {rnd}...")
+            all_ok = True
+            for ch in chapters:
+                if not run_sanity_check(last_round_dir, spec_dir, previous_editor_json, ch):
+                    all_ok = False
+            if not all_ok:
+                log.warning(f"Sanity check issues found in round {rnd}.")
 
         # store for next iteration
-        previous_critic_json = critic_json
+        previous_editor_json = editor_json
         last_round_dir = spec_dir
 
     # after the iterative rounds, create the final refined drafts

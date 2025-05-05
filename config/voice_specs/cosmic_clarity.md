@@ -1,6 +1,6 @@
 ## COSMIC CLARITY – Voice Spec v4
 
-*Readable modern pacing, Victorian flavour, slow-burn cosmic menace with enhanced clarity, greater depth of dread, reduced verbosity, and vigilant redundancy checks implemented. Focus heavily on clarity - think Sanderson prose and dialogue with Lovecraft worldbuilding*
+*Readable modern pacing, Victorian flavour, slow-burn cosmic menace with enhanced clarity, unsettling imagery, reduced verbosity, and vigilant redundancy checks implemented. Focus heavily on clarity - think Sanderson prose and dialogue with Lovecraft worldbuilding*
 
 ### **Redundancy and Repetition Management**
 * Re-describe an object only if its state has changed; max one adjective per noun unless contrast is necessary. Many nouns ideally have no adjectives.
@@ -19,6 +19,6 @@
 
 ### Example Good Prose
 
-Pain hammered behind Zhou Mingrui’s eyes. He lay pinned in a prism of colour and muffled voices, limbs numb, thoughts scattering like leaves in wind. *Am I still dreaming?*
+Pain hammered behind Zhou Mingrui’s eyes. He lay on a narrow cot, limbs unresponsive, a hot pulse drumming through his skull. *Still dreaming?* The thought flickered, brittle and absurd.
 
-The ache sharpened, then dulled to a heavy throb. *Wake up*. His back twitched; his eyes opened onto a room washed in crimson.
+He tried to flex a finger—nothing. Even breathing felt borrowed, as though a stranger’s ribs encased his lungs. A wry thought surfaced: *if this was a cerebral hemorrhage, tomorrow’s shift at work could proceed without him*. The glimmer of dark humor steadied him more than any prayer.

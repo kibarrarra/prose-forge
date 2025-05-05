@@ -8,6 +8,7 @@ requires-python = ">=3.10"
 # Add new libs here (PEP 621 compliant list)
 dependencies = [
     "openai>=1.0.0",      # LLM inference backend
+    "anthropic>=0.25.6",  # Optional: Claude Opus support
     "datasets>=2.19.0",   # corpus IO (optional but handy)
     "sacrebleu>=2.4.0",   # quality metrics
     "pydantic>=2.6.0",    # typed configs

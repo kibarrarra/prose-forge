@@ -14,14 +14,14 @@ import argparse, json, pathlib, textwrap, os
 from utils.io_helpers import read_utf8
 from utils.paths import CTX_DIR
 from utils.logging_helper import get_logger
-from utils.openai_client import get_openai_client
+from utils.llm_client import get_llm_client
 
 import tiktoken
 
 log = get_logger()
 MODEL = "gpt-4o-mini"   # cheap for discussion
 
-client = get_openai_client()
+client = get_llm_client()
 
 def count_tokens(text: str) -> int:
     """Count tokens in text using GPT-4's tokenizer."""
