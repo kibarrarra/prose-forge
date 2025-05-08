@@ -203,8 +203,10 @@ def build_segment_author_prompt(raw_segments: list[str],
     persona_note = f" as {persona}" if persona else ""
     system = f"""You are 'Chapter-Author'{persona_note}.
 Follow the voice spec. {length_hint}
-You will rewrite the RAW text **segment by segment**, keeping each segment's
-word-count within ±10 %. Do NOT cut segments or merge them.
+You will rewrite the RAW text by applying the VOICE SPEC to each segment.
+The primary goal is to transform the raw content into a polished narrative 
+that fully embodies the VOICE SPEC, while preserving all core narrative events, 
+character actions, and essential descriptive details from the RAW segments.
 
 VOICE SPEC
 ----------
@@ -226,13 +228,14 @@ RAW ENDING (last ≈60 w)
 
 INSTRUCTIONS
 1. Work in order S1 → S{len(raw_segments)}.
-   • Rewrite each segment; do not skip or shorten it significantly (target ±10% words).
-   • If a segment is already clear, you may keep sentences verbatim.
-2. Preserve every plot beat and all factual details.
-3. After all segments, perform a SELF-CHECK:
-   – If total words are <90 % or >110 % of RAW, expand/trim accordingly.
-   – Ensure the final sentence ends on **the identical narrative beat** shown
-     in RAW ENDING (no extra closure or foreshadowing).
+   • For each segment, rewrite it to fully embody the VOICE SPEC. Preserve its core narrative events, character actions, and essential descriptive details.
+   • While the word count of your rewritten segment should be *roughly comparable* to the original RAW segment, prioritize achieving the stylistic goals of the VOICE SPEC (e.g., fluidity, imagery, tone, pacing) over strict word-for-word or sentence-for-sentence matching for each individual segment.
+   • Even if a segment's meaning is clear in the RAW text, ensure its prose is *fully transformed* to align with the VOICE SPEC. Verbatim sentences from the RAW text should be rare and only used if they already perfectly match the target voice and style.
+   • Focus on making transitions between sentences and ideas *within* each rewritten segment smooth, natural, and stylistically consistent with the VOICE SPEC, rather than just rephrasing sentence by sentence.
+2. Preserve every plot beat and all factual details from the RAW source across the entire chapter.
+3. After processing all segments, perform a SELF-CHECK:
+   – Ensure the overall chapter's total word count is within ±20% of the original RAW text's total word count ({length_hint.split('≈')[-1].split(' ')[0]} words). Expand or trim sentences/phrases across segments if needed to meet this target, but do so in a way that maintains stylistic integrity and narrative coherence.
+   – Ensure the final sentence ends on **the identical narrative beat** shown in RAW ENDING (no extra closure or foreshadowing).
 4. Output the full chapter with *no segment labels* and no commentary.
    **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
 """
@@ -303,7 +306,33 @@ def call_llm(msgs: list[dict], temp: float, max_tokens: int, model: str) -> str:
             )
             # If we get here, API call succeeded - try to parse response
             try:
-                return res.choices[0].message.content.strip()
+                if not res.choices:
+                    log.error(f"LLM call for model {model} returned no choices.")
+                    raise ValueError("LLM response contained no choices.")
+
+                choice = res.choices[0]
+                
+                completion_reason = None
+                if hasattr(choice, 'finish_reason'): # OpenAI SDK standard
+                    completion_reason = choice.finish_reason
+                elif hasattr(choice, 'stop_reason'): # Anthropic SDK standard (if adapter places it here)
+                    completion_reason = choice.stop_reason
+                
+                if completion_reason:
+                    log.info(f"LLM call completion_reason: {completion_reason} for model {model}")
+                    # Check for truncation reasons from either OpenAI or Anthropic
+                    if completion_reason == "length" or completion_reason == "max_tokens": 
+                        log.warning(f"LLM output was truncated due to token limit for model {model}.")
+                else:
+                    log.warning(f"Could not determine completion reason for model {model}. "
+                                f"Choice object type: {type(choice)}, attributes: {dir(choice)}")
+
+                if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
+                    return choice.message.content.strip()
+                else:
+                    log.error(f"LLM choice object for model {model} lacks expected 'message.content' structure. Choice: {choice}")
+                    raise ValueError("LLM response choice lacks 'message.content'.")
+                    
             except Exception as e:
                 # Don't retry on response parsing errors
                 log.error("Failed to parse LLM response: %s", e)

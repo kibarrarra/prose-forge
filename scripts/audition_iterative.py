@@ -63,20 +63,40 @@ def call_writer(out_dir: pathlib.Path, persona: str, chapters: list[str],
     scratch."""
 
     for ch in chapters:
-        cmd = [sys.executable, str(WRITER), ch,
-               "--persona", persona,
-               "--spec", str(spec_path),
-               "--audition-dir", str(out_dir)]
+        # Base command parts, common to all calls
+        base_cmd_parts = [
+            sys.executable, str(WRITER), ch,
+            "--persona", persona,
+            "--spec", str(spec_path),
+            "--audition-dir", str(out_dir)
+        ]
+        
+        cmd = list(base_cmd_parts) # Initialize cmd with base parts
 
-        if prev_round_dir is not None:
-            prev_draft = prev_round_dir / f"{ch}.txt"
-            if prev_draft.exists():
-                cmd += ["--prev", str(prev_draft)]
+        # Determine if this is the first draft pass in the iterative process
+        is_first_iterative_pass = (critic_feedback is None and prev_round_dir is None)
 
-        if critic_feedback and critic_feedback.exists():
-            cmd += ["--critic-feedback", str(critic_feedback)]
+        if is_first_iterative_pass:
+            cmd.extend(["--segmented-first-draft", "--chunk-size", "250"])
+            log.info(f"Chapter {ch}: First iterative pass, using segmented first draft with chunk size 250.")
+        else:
+            # This is a revision pass
+            log.info(f"Chapter {ch}: Revision pass.")
+            if prev_round_dir is not None:
+                prev_draft_path = prev_round_dir / f"{ch}.txt"
+                if prev_draft_path.exists():
+                    cmd.extend(["--prev", str(prev_draft_path)])
+                else:
+                    log.warning(f"Chapter {ch}: Revision mode, but previous draft not found at {prev_draft_path}. This might affect revision quality.")
+            
+            if critic_feedback and critic_feedback.exists():
+                cmd.extend(["--critic-feedback", str(critic_feedback)])
+            else:
+                # Only warn if it's a revision pass (not first) and feedback is unexpectedly missing
+                if not is_first_iterative_pass:
+                     log.warning(f"Chapter {ch}: Revision mode, but critic feedback JSON not provided or found. Check if {critic_feedback} is expected.")
 
-        log.info("RUN: %s", " ".join(cmd))
+        log.info("RUN: %s", " ".join(map(str, cmd))) # Use map(str, ...) for safety
 
         # Ensure the project root is on PYTHONPATH for the subprocess
         env = os.environ.copy()
