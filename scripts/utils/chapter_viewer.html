@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter Comparison Viewer</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        .controls {
+            padding: 15px;
+            background-color: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+        }
+        .file-input {
+            margin-right: 10px;
+            margin-bottom: 10px;
+            display: inline-block;
+        }
+        .container {
+            display: flex;
+            height: calc(100vh - 80px);
+            width: 100%;
+        }
+        .chapter {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            border-right: 1px solid #ccc;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        .chapter:last-child {
+            border-right: none;
+        }
+        h2 {
+            position: sticky;
+            top: 0;
+            background-color: #fff;
+            padding: 10px 0;
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            z-index: 10;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: inherit;
+            line-height: 1.5;
+        }
+        .hidden {
+            display: none;
+        }
+        .button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <h3>Chapter Comparison Viewer</h3>
+        <div>
+            <div class="file-input">
+                <label for="file1">Chapter 1:</label>
+                <input type="file" id="file1" accept=".txt">
+            </div>
+            <div class="file-input">
+                <label for="file2">Chapter 2:</label>
+                <input type="file" id="file2" accept=".txt">
+            </div>
+            <div class="file-input">
+                <label for="file3">Chapter 3:</label>
+                <input type="file" id="file3" accept=".txt">
+            </div>
+            <button class="button" id="clearBtn">Clear All</button>
+        </div>
+    </div>
+
+    <div class="container" id="chaptersContainer">
+        <div class="chapter" id="chapter1">
+            <h2 id="title1">Chapter 1</h2>
+            <pre id="content1">No file loaded. Use the control above to load a chapter file.</pre>
+        </div>
+        <div class="chapter hidden" id="chapter2">
+            <h2 id="title2">Chapter 2</h2>
+            <pre id="content2">No file loaded.</pre>
+        </div>
+        <div class="chapter hidden" id="chapter3">
+            <h2 id="title3">Chapter 3</h2>
+            <pre id="content3">No file loaded.</pre>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // File input handlers
+            document.getElementById('file1').addEventListener('change', function(e) {
+                handleFileSelect(e, 'content1', 'title1', 'chapter1');
+            });
+            
+            document.getElementById('file2').addEventListener('change', function(e) {
+                handleFileSelect(e, 'content2', 'title2', 'chapter2');
+            });
+            
+            document.getElementById('file3').addEventListener('change', function(e) {
+                handleFileSelect(e, 'content3', 'title3', 'chapter3');
+            });
+            
+            // Clear button handler
+            document.getElementById('clearBtn').addEventListener('click', function() {
+                clearAllContent();
+            });
+            
+            // Handle file selection
+            function handleFileSelect(event, contentId, titleId, chapterId) {
+                const file = event.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById(contentId).textContent = e.target.result;
+                    document.getElementById(titleId).textContent = file.name;
+                    document.getElementById(chapterId).classList.remove('hidden');
+                    updateLayout();
+                };
+                reader.readAsText(file);
+            }
+            
+            // Clear all content
+            function clearAllContent() {
+                for (let i = 1; i <= 3; i++) {
+                    document.getElementById(`content${i}`).textContent = 
+                        i === 1 ? 'No file loaded. Use the control above to load a chapter file.' : 'No file loaded.';
+                    document.getElementById(`title${i}`).textContent = `Chapter ${i}`;
+                    if (i > 1) {
+                        document.getElementById(`chapter${i}`).classList.add('hidden');
+                    }
+                    document.getElementById(`file${i}`).value = '';
+                }
+                updateLayout();
+            }
+            
+            // Update layout based on visible chapters
+            function updateLayout() {
+                const container = document.getElementById('chaptersContainer');
+                const visibleChapters = Array.from(container.children)
+                    .filter(el => !el.classList.contains('hidden'));
+                
+                const percentWidth = 100 / visibleChapters.length;
+                visibleChapters.forEach(chapter => {
+                    chapter.style.width = `${percentWidth}%`;
+                });
+            }
+        });
+    </script>
+</body>
+</html> 
