@@ -75,15 +75,16 @@ def build_verifier_prompt(prev_draft: str, new_draft: str, change_list: dict, ra
         Absolutely forbid introduction of foreshadowing or closure that is absent in the RAW ENDING.
         """))
 
+    # Now replace with clearer checklist format with symbols
     prompt_parts.append(textwrap.dedent("""\
         VERIFICATION CHECKLIST:
-        1. MANDATORY EDITS: Were ALL items under MUST applied in the NEW DRAFT? (Answer YES/NO and list specific failures if NO)
-        2. NICE EDITS: If any NICE items were applied, are they reasonable and well-integrated? (Answer YES/NO/NA and explain briefly if NO)
-        3. HALLUCINATIONS/ERRORS: Did the NEW DRAFT introduce any factual errors, plot inconsistencies, or elements not supported by the previous draft or the change list? (Answer YES/NO, provide examples if YES)
-        4. ENDING BEAT: Does the NEW DRAFT's final sentence respect the RAW ENDING constraint? (Answer YES/NO/NA, explain if NO)
+        1. MANDATORY EDITS: ✓/✗ - Were ALL items under MUST applied in the NEW DRAFT? (Answer ✓ if all were applied, ✗ if any were missed, and list specific failures if ✗)
+        2. NICE EDITS: ✓/✗/NA - If any NICE items were applied, are they reasonable and well-integrated? (Answer ✓ if good, ✗ if problematic, NA if none applied)
+        3. HALLUCINATIONS/ERRORS: ✓/✗ - Is the NEW DRAFT free of factual errors or plot inconsistencies? (Answer ✓ if clean, ✗ if problems found, providing examples)
+        4. ENDING BEAT: ✓/✗/NA - Does the NEW DRAFT's final sentence respect the RAW ENDING constraint? (Answer ✓ if respected, ✗ if violated)
 
         OUTPUT FORMAT:
-        Provide your assessment based *only* on the checklist above. Start with a single line: "VERDICT: OK" or "VERDICT: ISSUES FOUND". Then, list any specific issues found for points 1-4. Be concise.
+        Provide your assessment based *only* on the checklist above. Start with a single line: "VERDICT: OK" or "VERDICT: ISSUES FOUND". Then list each numbered point with its ✓/✗/NA symbol first, followed by explanation. For a perfect draft, all applicable items should have ✓.
         """))
 
     return "\n\n".join(prompt_parts)

@@ -33,27 +33,48 @@ except ImportError:
     def normalise(s: str) -> str:
         return unicodedata.normalize("NFKC", s.replace("\r\n", "\n"))
 
-def format_paragraphs(text: str) -> str:
-    """Format text with proper paragraph breaks and spacing."""
-    # Normalize all whitespace first
-    text = re.sub(r'\s+', ' ', text)
+def convert_html_to_paragraphs(html_content: str) -> str:
+    """Convert HTML to plaintext while preserving paragraph structure."""
+    # Replace paragraph and header tags with markers
+    text = re.sub(r'<h\d[^>]*>(.*?)</h\d>', r'\n\n\1\n\n', html_content, flags=re.DOTALL)
+    text = re.sub(r'<p[^>]*>(.*?)</p>', r'\n\n\1', text, flags=re.DOTALL)
     
-    # Split into paragraphs based on common paragraph markers
-    paragraphs = re.split(r'(?:\n\s*){2,}|(?:\r\n\s*){2,}', text)
+    # Convert italic tags to asterisks
+    text = re.sub(r'<em>(.*?)</em>', r'*\1*', text, flags=re.DOTALL)
+    text = re.sub(r'<i>(.*?)</i>', r'*\1*', text, flags=re.DOTALL)
     
-    # Clean and format each paragraph
-    formatted_paragraphs = []
+    # Convert bold tags to double asterisks
+    text = re.sub(r'<strong>(.*?)</strong>', r'**\1**', text, flags=re.DOTALL)
+    text = re.sub(r'<b>(.*?)</b>', r'**\1**', text, flags=re.DOTALL)
+    
+    # Strip remaining HTML tags
+    text = strip_html(text)
+    
+    # Fix text encoding issues
+    text = fix_text(text)
+    
+    # Normalize whitespace within paragraphs
+    paragraphs = re.split(r'\n\s*\n', text)
+    cleaned_paragraphs = []
+    
     for para in paragraphs:
-        para = para.strip()
-        if not para:
+        # Skip empty paragraphs
+        if not para.strip():
             continue
-        # Remove excessive internal whitespace
-        para = re.sub(r'\s+', ' ', para)
+        
+        # Skip translator, editor info
+        if re.match(r'^\*\*(?:Translator|Editor)\:\*\*', para.strip()):
+            continue
+        
+        # Clean up internal whitespace but preserve paragraph structure
+        para = re.sub(r'\s+', ' ', para.strip())
+        
         # Ensure proper sentence spacing
         para = re.sub(r'\.([A-Z])', r'. \1', para)
-        formatted_paragraphs.append(para)
+        
+        cleaned_paragraphs.append(para)
     
-    return '\n\n'.join(formatted_paragraphs)
+    return '\n\n'.join(cleaned_paragraphs)
 
 def clean_json(path: Path) -> str:
     """Extract plaintext from crawler JSON with improved formatting."""
@@ -61,19 +82,17 @@ def clean_json(path: Path) -> str:
     if not isinstance(blocks, list):
         blocks = [blocks]
     parts = []
-    for chapter in blocks:
-        text = next(
-            (chapter.get(k) for k in ("content", "body", "text", "chapter") if k in chapter),
-            ""
-        )
-        if text:
-            # Apply ftfy fixes and strip HTML
-            text = fix_text(strip_html(text))
-            parts.append(text)
     
-    # Join all parts and format paragraphs
-    combined = "\n\n".join(parts)
-    return format_paragraphs(normalise(combined))
+    for chapter in blocks:
+        # Try to get content from various possible fields
+        for field in ("body", "content", "text", "chapter"):
+            if field in chapter and chapter[field]:
+                html_content = chapter[field]
+                text = convert_html_to_paragraphs(html_content)
+                parts.append(text)
+                break
+    
+    return '\n\n'.join(parts)
 
 def source_paths(single_id: str | None, all_chapters: bool) -> list[Path]:
     log.info("Searching in directory: %s", RAW_DIR)

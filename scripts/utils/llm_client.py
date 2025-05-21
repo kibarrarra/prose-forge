@@ -33,9 +33,31 @@ class _AnthropicResponseAdapter:  # pylint: disable=too-few-public-methods
     """Wrap an Anthropic response so it mimics OpenAI's return structure."""
 
     def __init__(self, response):
-        # Match the minimal interface we rely on: `choices[0].message.content`.
+        # Match the minimal interface we rely on: `choices[0].message.content`
         content = _flatten_anthropic_content(response.content)
-        self.choices = [SimpleNamespace(message=SimpleNamespace(content=content))]
+        
+        # Determine what properties are available in the response
+        response_attrs = dir(response)
+        
+        # Create a choice object with message and completion reason
+        choice = SimpleNamespace(message=SimpleNamespace(content=content))
+        
+        # Handle different versions of the Anthropic API:
+        # 1. Try stop_reason (newer versions)
+        if 'stop_reason' in response_attrs:
+            choice.stop_reason = response.stop_reason
+            # Also map to OpenAI's finish_reason for compatibility
+            choice.finish_reason = response.stop_reason
+        # 2. Try stop_sequence (older versions)
+        elif 'stop_sequence' in response_attrs:
+            choice.stop_reason = 'stop_sequence' if response.stop_sequence else 'max_tokens'
+            choice.finish_reason = 'stop' if response.stop_sequence else 'length'
+        # 3. Check type field for truncation
+        elif 'type' in response_attrs and hasattr(response, 'type'):
+            choice.stop_reason = 'max_tokens' if response.type == 'message_incomplete' else 'stop'
+            choice.finish_reason = 'length' if response.type == 'message_incomplete' else 'stop'
+        
+        self.choices = [choice]
 
 
 class UnifiedClient:

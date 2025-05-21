@@ -24,7 +24,7 @@ Core modes
 import argparse, json, math, pathlib, re, sys, textwrap
 from utils.paths import RAW_DIR, SEG_DIR, CTX_DIR, DRAFT_DIR, CONFIG_DIR
 from typing import Optional, TypedDict
-from utils.io_helpers import read_utf8, write_utf8
+from utils.io_helpers import read_utf8, write_utf8, normalize_text
 from utils.llm_client import get_llm_client
 from ftfy import fix_text
 import os
@@ -182,13 +182,16 @@ def build_author_prompt(source: str, voice_spec: str, length_hint: str,
     # ────────────────────────────────────────────────────
     # SELF-CHECK to catch hallucinations / new elements
     # ────────────────────────────────────────────────────
-    user_parts.append(textwrap.dedent("""\
+    # Check if a custom self-check is provided via environment variable
+    self_check = os.environ.get("WRITER_SELF_CHECK_OVERRIDE", textwrap.dedent("""\
         SELF-CHECK:
         List, in bullet form, any line that introduces a new object, event, or
         future plan that was not present in the RAW. Then rewrite the draft to
         remove them.  Return the revised draft only—no extra commentary or labels.
         **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
         """))
+    
+    user_parts.append(self_check)
 
     return [
         {"role": "system", "content": system},
@@ -245,45 +248,50 @@ INSTRUCTIONS
 
 def build_revision_prompt(current: str, change_list: dict, voice_spec: str, raw_ending: str | None = None) -> list[dict]:
     system = textwrap.dedent(f"""\
-        You are the same 'Chapter-Author'.
-        You MUST apply every change listed under "must" exactly as specified—no omissions.
-        You MAY apply changes under "nice" if they genuinely improve clarity, mood, or pacing.
-        Do NOT introduce new plot points, foreshadowing, or factual inconsistencies outside the RAW ending beat.
-        ---
-        VOICE SPEC
-        ----------
-        {voice_spec}
+You are the same 'Chapter-Author'.
+You MUST apply every change listed under "must" exactly as specified—no omissions.
+You MAY apply changes under "nice" if they genuinely improve clarity, mood, or pacing.
+Do NOT introduce new plot points, foreshadowing, or factual inconsistencies outside the RAW ending beat.
+You MUST keep the word count approximately the same as the previous draft. You should strive to make the fewest possible edits while accommodating editor demands.
+---
+VOICE SPEC
+----------
+{voice_spec}
+----------
         """)
 
     user_parts = [textwrap.dedent(f"""\
-        PREVIOUS DRAFT:
-        {current}
+PREVIOUS DRAFT:
+{current}
 
-        CHANGE LIST (JSON):
-        {json.dumps(change_list, indent=2, ensure_ascii=False)}
+CHANGE LIST (JSON):
+{json.dumps(change_list, indent=2, ensure_ascii=False)}
         """)]
 
     if raw_ending:
         user_parts.append(textwrap.dedent(f"""\
-            RAW ENDING (last ≈60 words):
-            ---------------------------
-            {raw_ending}
-
-            Do NOT add any interpretation, foreshadowing, or sense of closure
-            that is absent in the RAW ENDING. Maintain its exact tone and
-            level of uncertainty or suspense.
+RAW ENDING (last ≈60 words):
+---------------------------
+{raw_ending}
+---------------------------
+Do NOT add any interpretation, foreshadowing, or sense of closure
+that is absent in the RAW ENDING. Maintain its exact tone and
+level of uncertainty or suspense.
             """))
 
     # ────────────────────────────────────────────────────
     # SELF-CHECK to ensure MUST edits & no hallucinations
     # ────────────────────────────────────────────────────
-    user_parts.append(textwrap.dedent("""\
-        SELF-CHECK:
-        1. List, in bullet form, any MUST item that remains unimplemented.
-        2. List any new object, event, or future plan that was not present in the PREVIOUS DRAFT.
-        Then rewrite the draft to fix these issues.  Return FINAL only—no extra commentary or labels.
-        **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
+    # Check if a custom self-check is provided via environment variable
+    self_check = os.environ.get("WRITER_SELF_CHECK_OVERRIDE", textwrap.dedent("""\
+SELF-CHECK:
+1. List, in bullet form, any MUST item that remains unimplemented.
+2. List any new object, event, or future plan that was not present in the PREVIOUS DRAFT.
+Then rewrite the draft to fix these issues.  Return FINAL only—no extra commentary or labels.
+**CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
         """))
+    
+    user_parts.append(self_check)
 
     user = "\n\n".join(user_parts)
 
@@ -293,6 +301,25 @@ def build_revision_prompt(current: str, change_list: dict, voice_spec: str, raw_
 def call_llm(msgs: list[dict], temp: float, max_tokens: int, model: str) -> str:
     MAX_RETRIES = 3
     INITIAL_DELAY_SECS = 1
+    
+    # Save the prompts to a log file for debugging
+    log_dir = pathlib.Path("logs/prompts")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"prompt_{timestamp}_{model.replace('-', '_')}.txt"
+    
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write(f"MODEL: {model}\n")
+        f.write(f"TEMP: {temp}\n")
+        f.write(f"MAX_TOKENS: {max_tokens}\n\n")
+        
+        for msg in msgs:
+            f.write(f"--- {msg['role'].upper()} ---\n\n")
+            f.write(msg['content'])
+            f.write("\n\n")
+    
+    log.info(f"Prompt saved to {log_file}")
 
     delay = INITIAL_DELAY_SECS
     last_error = None
@@ -328,7 +355,9 @@ def call_llm(msgs: list[dict], temp: float, max_tokens: int, model: str) -> str:
                                 f"Choice object type: {type(choice)}, attributes: {dir(choice)}")
 
                 if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
-                    return choice.message.content.strip()
+                    content = choice.message.content.strip()
+                    # Normalize special characters in the LLM response
+                    return normalize_text(content)
                 else:
                     log.error(f"LLM choice object for model {model} lacks expected 'message.content' structure. Choice: {choice}")
                     raise ValueError("LLM response choice lacks 'message.content'.")
@@ -403,6 +432,9 @@ def make_first_draft(text: str, chap_id: str, args, voice_spec: str,
 
     draft = call_llm(prompt, temp=0.5, max_tokens=max_toks, model=args.model)
 
+    # Ensure text is properly normalized to handle special characters
+    draft = normalize_text(draft)
+
     # For auditions, write to the audition directory
     if args.audition_dir:
         folder = args.audition_dir
@@ -450,6 +482,9 @@ def make_revision(chap_id: str, args, voice_spec: str) -> pathlib.Path:
     prompt = build_revision_prompt(current, change_list, voice_spec, raw_ending)
     new_draft = call_llm(prompt, temp=0.2, max_tokens=max_toks, model=args.model)
 
+    # Ensure text is properly normalized to handle special characters
+    new_draft = normalize_text(new_draft)
+
     if args.audition_dir:
         # Overwrite the file directly for audition mode
         write_utf8(current_path, new_draft)
@@ -488,6 +523,10 @@ def main() -> None:
     args = parse_args()
     chap_path = resolve_chapter(args.chapter)
     raw_text, chap_id = load_raw_text(chap_path)
+
+    # Debug output to help diagnose logging issues
+    log.info("Writer args: critic_feedback=%s, prev=%s", 
+             args.critic_feedback, args.prev)
 
     # ── voice spec resolution ─────────────────────────────────────────────
     spec_path = args.spec

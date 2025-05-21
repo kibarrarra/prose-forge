@@ -1,0 +1,54 @@
+experiments:
+  - name: cosmic_clarity_standard
+    writer_spec: config/writer_specs/standard.json
+    editor_spec: config/editor_specs/baseline.md
+    voice_spec: config/voice_specs/cosmic_clarity.md
+    model: claude-3-opus-20240229
+    chapters:
+      - lotm_0001
+    rounds: 1
+
+  - name: cosmic_clarity_4o
+    writer_spec: config/writer_specs/standard.json
+    editor_spec: config/editor_specs/baseline.md
+    voice_spec: config/voice_specs/cosmic_clarity.md
+    model: gpt-4o
+    chapters:
+      - lotm_0001
+    rounds: 2
+
+  - name: cosmic_clarity_elaborate
+    writer_spec: config/writer_specs/elaborate.json
+    editor_spec: config/editor_specs/baseline.md
+    voice_spec: config/voice_specs/cosmic_clarity.md
+    model: claude-3-opus-20240229
+    chapters:
+      - lotm_0001
+    rounds: 2
+    
+  - name: stars_and_shadow_standard
+    writer_spec: config/writer_specs/standard.json
+    editor_spec: config/editor_specs/baseline.md
+    voice_spec: config/voice_specs/stars_and_shadow.md
+    model: claude-3-opus-20240229
+    chapters:
+      - lotm_0001
+    rounds: 2
+
+  - name: lotm_o3_1_standard
+    writer_spec: config/writer_specs/standard.json
+    editor_spec: config/editor_specs/baseline.md
+    voice_spec: config/voice_specs/lotm_o3_1.md
+    model: claude-3-opus-20240229
+    chapters:
+      - lotm_0001
+    rounds: 2
+
+  - name: lovecraft_standard
+    writer_spec: config/writer_specs/standard.json
+    editor_spec: config/editor_specs/baseline.md
+    voice_spec: config/voice_specs/lovecraft.md
+    model: gpt-4o
+    chapters:
+      - lotm_0001
+    rounds: 2

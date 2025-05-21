@@ -87,10 +87,11 @@ For a **single chapter first draft**:
 ```bash
 python scripts/writer.py lotm_0001 \
        --spec config/voice_specs/cosmic_clarity.md \
-       --persona cosmic_clarity
+       --persona cosmic_clarity \
+       --segmented-first-draft
 ```
 
-Recommended: run the **iterative audition loop** which automatically performs multiple writer ⇄ critic rounds and outputs a final version:
+You can run the **iterative audition loop** which automatically performs multiple writer ⇄ critic rounds and outputs a final version:
 
 ```bash
 python scripts/audition_iterative.py cosmic_clarity 2 --rounds 2
@@ -105,6 +106,58 @@ The command above will:
 3. Pass that feedback plus the previous draft into `writer.py` for the next round.
 4. After the configured rounds, generate a *final* version in `drafts/auditions/cosmic_clarity/final`.
 
+However, for most use cases, the more powerful `run_experiments.py` script is recommended (see next section).
+
+---
+
+## 5.1 Running Experiments
+
+For more structured experimentation across different voice specs, prompts, and models:
+
+```bash
+# Run all experiments defined in experiments.yaml
+python scripts/run_experiments.py --config experiments.yaml
+
+# Run experiments matching a specific filter
+python scripts/run_experiments.py --config experiments.yaml --filter cosmic
+
+# Compare results of two completed experiments (final outputs)
+# Note: --config not needed for comparison operations
+python scripts/run_experiments.py --compare cosmic_clarity_standard stars_and_shadow_standard
+
+# Compare any two draft directories (e.g., first draft vs final version)
+python scripts/run_experiments.py --compare-dirs "drafts/auditions/exp1/round_1" "drafts/auditions/exp1/final"
+```
+
+Experiments are defined in `experiments.yaml`:
+
+```yaml
+experiments:
+  - name: cosmic_clarity_standard
+    writer_spec: config/writer_specs/standard.json
+    editor_spec: config/editor_specs/assertive.md
+    voice_spec: config/voice_specs/cosmic_clarity.md
+    model: claude-3-opus-20240229
+    chapters:
+      - lotm_0001
+    rounds: 2  # With rounds > 1, editor feedback is generated and used
+```
+
+The experiment system allows you to easily compare:
+- Different voice specifications (from `config/voice_specs/`)
+- Different writer prompts (from `config/writer_specs/`)
+- Different editor/critic prompts (from `config/editor_specs/`)
+- Different LLM models (Claude, GPT-4o, etc.)
+
+**Note on rounds parameter:**
+- `rounds: 1`: Single-pass mode, writes directly to the final directory without editor feedback
+- `rounds: 2`: Two-pass mode with one draft and one revision (with editor feedback)
+- `rounds: 3`: Three-pass mode with one draft and two revisions (editor feedback after each round except the last)
+
+The `rounds` parameter represents the **total number of passes** through the writer, including the final version.
+
+Each experiment creates all necessary files in the `drafts/auditions/<experiment_name>/` directory. After running multiple experiments, you can compare their outputs with the `--compare` option, or compare specific directories (like first drafts vs finals) with `--compare-dirs`.
+
 ---
 
 ## 6  Directory Layout (key paths)
@@ -116,27 +169,58 @@ prose-forge/
 │   └── segments/            # paragraph-level slices
 ├── drafts/
 │   └── auditions/
-│       └── <persona>/
+│       └── <experiment_name>/
 │           ├── round_1/     # writer → critic loop dirs
 │           ├── round_2/
 │           └── final/
 ├── config/
-│   └── voice_specs/*.md     # tone/voice definitions
-├── scripts/                 # CLI tools (writer.py, editor_panel.py, ...)
-└── utils/                   # shared helpers
+│   ├── voice_specs/*.md     # tone/voice definitions
+│   ├── writer_specs/*.json  # writer prompt configurations with system prompts, instructions, and self-checks
+│   └── editor_specs/*.md    # editor/critic prompt templates
+├── examples/                # sample files to demonstrate usage
+│   ├── raw/                 # sample chapter in JSON format
+│   ├── segments/            # pre-segmented version of the sample chapter
+│   └── voice_spec_example.md # example voice specification
+├── scripts/                 # CLI tools (writer.py, editor_panel.py, run_experiments.py, ...)
+├── utils/                   # shared helpers
+└── experiments.yaml         # configuration for experiment runs
 ```
 
 ---
 
-## 7  Troubleshooting
+## 7  Trying the Examples
 
-* **Draft too short?** – Increase `--chunk-size` in segmented mode or tweak `estimate_max_tokens` factor in `scripts/writer.py`.
-* **Windows encoding errors?** – Ensure `PYTHONIOENCODING` is set to `utf-8` (see section 2.1).
-* **Model token limit reached?** – Adjust `max_tokens` calculation or switch to a model with a larger context window (Claude 3 Opus has 200 k tokens).
+The repository includes example files to help you get started:
+
+```bash
+# Run the writer on the sample chapter with the example voice spec
+python scripts/writer.py examples/raw/sample_001.json \
+       --spec examples/voice_spec_example.md \
+       --persona example \
+       --segmented-first-draft
+
+# Or use pre-segmented files
+python scripts/writer.py sample_001 \
+       --spec examples/voice_spec_example.md \
+       --persona example \
+       --segmented-first-draft
+```
+
+To create your own voice specifications, use the examples as a template. Each voice spec should define the narrative style, tone, language characteristics, and other stylistic elements.
 
 ---
 
-## 8  License
+## 8  Troubleshooting
+
+* **Draft too short?** – In writer.py, use `--segmented-first-draft` for better handling of longer content.
+* **Windows encoding errors?** – Ensure `PYTHONIOENCODING` is set to `utf-8` (see section 2.1).
+* **Model token limit reached?** – Switch to a model with a larger context window (Claude 3 Opus has 200k tokens).
+* **Experiment not running correctly?** – Check experiments.yaml format and make sure all referenced files exist.
+* **Cannot find sanity checker?** – The sanity checker is only used for rounds with previous drafts and feedback.
+
+---
+
+## 9  License
 
 MIT for all code. Do **not** redistribute copyrighted novel text.
 

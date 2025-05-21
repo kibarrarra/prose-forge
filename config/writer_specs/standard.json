@@ -1,0 +1,16 @@
+{
+  "system_prompt": "You are 'Chapter-Author'. Follow the voice spec. {{length_hint}}",
+  "instructions": {
+    "segment_mode": {
+      "intro": "You will rewrite the RAW text by applying the VOICE SPEC to each segment. The primary goal is to transform the raw content into a polished narrative that fully embodies the VOICE SPEC, while preserving all core narrative events, character actions, and essential descriptive details from the RAW segments.",
+      "segment_instructions": "1. Work in order from S1 to the final segment.\n   • For each segment, rewrite it to fully embody the VOICE SPEC. Preserve its core narrative events, character actions, and essential descriptive details.\n   • While the word count of your rewritten segment should be *roughly comparable* to the original RAW segment, prioritize achieving the stylistic goals of the VOICE SPEC (e.g., fluidity, imagery, tone, pacing) over strict word-for-word or sentence-for-sentence matching for each individual segment.\n   • Even if a segment's meaning is clear in the RAW text, ensure its prose is *fully transformed* to align with the VOICE SPEC. Verbatim sentences from the RAW text should be rare and only used if they already perfectly match the target voice and style.\n   • Focus on making transitions between sentences and ideas *within* each rewritten segment smooth, natural, and stylistically consistent with the VOICE SPEC, rather than just rephrasing sentence by sentence.\n2. Preserve every plot beat and all factual details from the RAW source across the entire chapter."
+    },
+    "raw_ending": "Do NOT add any interpretation, foreshadowing, or sense of closure that is absent in the RAW ENDING. Maintain its exact tone and level of uncertainty or suspense."
+  },
+  "self_check": {
+    "first_draft": "SELF-CHECK:\nList, in bullet form, any line that introduces a new object, event, or future plan that was not present in the RAW. Then rewrite the draft to remove them.  Return the revised draft only—no extra commentary or labels.\n**CRITICAL**: Start the output directly with the chapter text. Do not include preambles like \"Here is the draft...\".",
+    "segment_mode": "3. After processing all segments, perform a SELF-CHECK:\n   – Ensure the overall chapter's total word count is within ±20% of the original RAW text's total word count. Expand or trim sentences/phrases across segments if needed to meet this target, but do so in a way that maintains stylistic integrity and narrative coherence.\n   – Ensure the final sentence ends on **the identical narrative beat** shown in RAW ENDING (no extra closure or foreshadowing).\n4. Output the full chapter with *no segment labels* and no commentary.\n   **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like \"Here is the draft...\".",
+    "revision": "SELF-CHECK:\n1. List, in bullet form, any MUST item that remains unimplemented.\n2. List any new object, event, or future plan that was not present in the PREVIOUS DRAFT.\nThen rewrite the draft to fix these issues.  Return FINAL only—no extra commentary or labels.\n**CRITICAL**: Start the output directly with the chapter text. Do not include preambles like \"Here is the draft...\"."
+  },
+  "model": "claude-3-opus-20240229"
+} 

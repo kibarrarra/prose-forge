@@ -151,7 +151,19 @@ def run_sanity_check(prev_draft_dir: pathlib.Path, current_draft_dir: pathlib.Pa
 
     log.info("RUN Sanity Check: %s", " ".join(cmd))
     try:
-        subprocess.run(cmd, check=True, cwd=ROOT, capture_output=True, text=True)
+        # Set PYTHONIOENCODING to ensure UTF-8 is used for stdin/stdout/stderr
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        
+        # Use text=True and UTF-8 encoding explicitly
+        result = subprocess.run(cmd, check=True, cwd=ROOT, capture_output=True, 
+                      text=True, encoding='utf-8', errors='replace', env=env)
+        
+        # Log the stdout to the console
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                log.info(f"Sanity Check: {line}")
+        
         # Read the verdict
         if status_path.exists():
             verdict = read_utf8(status_path).strip()
@@ -161,6 +173,7 @@ def run_sanity_check(prev_draft_dir: pathlib.Path, current_draft_dir: pathlib.Pa
             log.warning(f"Sanity check status file missing: {status_path}")
             return False
     except subprocess.CalledProcessError as e:
+        # Still access stderr, but we know it's UTF-8 encoded now
         log.error(f"Sanity check failed for {chapter}:\n{e.stderr}")
         return False
 
