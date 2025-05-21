@@ -15,6 +15,9 @@ from utils.logging_helper import get_logger
 from utils.llm_client import get_llm_client
 
 import tiktoken
+from typing import Dict, List, Tuple, Any, Optional
+from datetime import datetime
+from tqdm import tqdm
 
 log = get_logger()
 MODEL = "gpt-4o-mini"   # cheap for discussion
@@ -424,6 +427,782 @@ def generate_html_output(result: dict) -> str:
     
     return html
 
+def gather_final_versions(
+    root_dir: pathlib.Path = ROOT / "drafts" / "auditions"
+) -> Dict[str, List[Tuple[str, str, str]]]:
+    """
+    Gather all final versions of chapters from experiment directories.
+    
+    Args:
+        root_dir: Root directory where experiment audition folders are located
+        
+    Returns:
+        Dictionary mapping chapter IDs to lists of (persona_name, chapter_text, voice_spec) tuples
+    """
+    # Organize by chapter for easy comparison
+    chapters: Dict[str, List[Tuple[str, str, str]]] = {}
+    
+    # Walk through all audition directories
+    for persona_dir in root_dir.iterdir():
+        if not persona_dir.is_dir():
+            continue
+            
+        final_dir = persona_dir / "final"
+        if not final_dir.exists() or not final_dir.is_dir():
+            continue
+            
+        # Look for voice spec in final directory
+        spec_path = final_dir / "voice_spec.md"
+        if spec_path.exists():
+            voice_spec = read_utf8(spec_path)
+        else:
+            log.warning(f"Voice spec not found in {final_dir}, using empty spec")
+            voice_spec = ""
+            
+        # Find all chapter files in final directory
+        for chapter_file in final_dir.glob("*.txt"):
+            # Skip non-chapter files
+            if "editor" in chapter_file.name or "sanity" in chapter_file.name:
+                continue
+                
+            chapter_id = chapter_file.stem
+            chapter_text = read_utf8(chapter_file)
+            
+            # Organize by chapter
+            if chapter_id not in chapters:
+                chapters[chapter_id] = []
+                
+            chapters[chapter_id].append((persona_dir.name, chapter_text, voice_spec))
+    
+    return chapters
+
+def rank_chapter_versions(
+    chapter_id: str,
+    versions: List[Tuple[str, str, str]],
+) -> Dict[str, Any]:
+    """
+    Rank multiple versions of a chapter and provide detailed feedback.
+    
+    Args:
+        chapter_id: The ID of the chapter being evaluated
+        versions: List of (persona_name, chapter_text, voice_spec) tuples
+        
+    Returns:
+        Dictionary containing ranking results and analysis
+    """
+    # Build the user prompt with all chapter versions
+    draft_sections = []
+    for i, (persona, text, spec) in enumerate(versions, 1):
+        # Use persona as draft ID to make results more interpretable
+        draft_id = f"DRAFT_{persona}"
+        
+        draft_section = f"""<<<{draft_id}>>>
+Voice-Spec:
+{spec}
+
+Text:
+{text}
+<<<END>>>"""
+        draft_sections.append(draft_section)
+    
+    drafts_text = "\n\n".join(draft_sections)
+    
+    # First, get rankings from each critic independently
+    critic_a_system = "You are Critic A, focused on technical writing quality and clarity."
+    critic_b_system = "You are Critic B, focused on creative writing and atmosphere."
+    
+    ranking_rubric = f"""Compare {len(versions)} anonymous prose drafts of chapter {chapter_id}.
+For each draft, provide:
+
+1. Clarity & readability — score 1-10
+2. Tone & atmosphere — score 1-10
+3. Faithfulness to original story events — score 1-10
+4. Overall literary quality — score 1-10
+
+Then produce:
+
+A. A ranked list - highest overall score first - break ties with literary quality - show the four numeric scores in a table.
+
+B. A concise paragraph (≤150 words) explaining **why** the top draft outperforms the others, citing concrete strengths.
+
+C. One bullet of constructive feedback for **each** non-winning draft (≤20 words each).
+
+⚠️ Output **only** valid JSON of the form:
+
+{{
+  "table": [
+     {{"rank": 1, "id": "DRAFT_X", "clarity": 9, "tone": 8, "faithfulness": 9, "overall": 9}},
+     …
+  ],
+  "analysis": "…",
+  "feedback": {{
+     "DRAFT_Y": "…",
+     "DRAFT_Z": "…"
+  }}
+}}
+
+Below are the drafts, separated by markers:
+
+{drafts_text}"""
+
+    # Log the prompts to file
+    log_dir = ROOT / "logs" / "prompts"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Log critic A prompt
+    with open(log_dir / f"critic_A_ranking_{chapter_id}_{timestamp}.txt", "w", encoding="utf-8") as f:
+        f.write(f"System: {critic_a_system}\n\nUser: {ranking_rubric}")
+    
+    # Log critic B prompt
+    with open(log_dir / f"critic_B_ranking_{chapter_id}_{timestamp}.txt", "w", encoding="utf-8") as f:
+        f.write(f"System: {critic_b_system}\n\nUser: {ranking_rubric}")
+    
+    log.info(f"Logged ranking prompts to {log_dir}")
+
+    # Call the first critic for rankings
+    try:
+        res_a = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": critic_a_system},
+                {"role": "user", "content": ranking_rubric}
+            ],
+            response_format={"type": "json_object"}  # Ensure JSON response
+        )
+        result_a = res_a.choices[0].message.content.strip()
+        ranking_data_a = json.loads(result_a)
+        
+        # Call the second critic for rankings
+        res_b = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": critic_b_system},
+                {"role": "user", "content": ranking_rubric}
+            ],
+            response_format={"type": "json_object"}  # Ensure JSON response
+        )
+        result_b = res_b.choices[0].message.content.strip()
+        ranking_data_b = json.loads(result_b)
+        
+        # Now get a discussion between the critics
+        discussion_prompt = f"""Here are two critics' evaluations of {len(versions)} prose drafts.
+
+CRITIC A (Technical & Clarity):
+{result_a}
+
+CRITIC B (Creative & Atmosphere):
+{result_b}
+
+Please create a discussion between Critic A and Critic B where they debate the merits of each draft. 
+The discussion should include:
+
+1. Each critic briefly defending their top pick and explaining their scoring
+2. A back-and-forth discussion about the strengths and weaknesses of the drafts
+3. An eventual consensus on the final ranking
+
+End with a clear recommendation on which draft is best overall and why.
+
+The response should read like a realistic conversation between two literary critics.
+"""
+
+        # Log discussion prompt
+        with open(log_dir / f"critics_discussion_{chapter_id}_{timestamp}.txt", "w", encoding="utf-8") as f:
+            f.write(f"System: You are facilitating a discussion between two literary critics.\n\nUser: {discussion_prompt}")
+        
+        discussion_res = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": "You are facilitating a discussion between two literary critics."},
+                {"role": "user", "content": discussion_prompt}
+            ]
+        )
+        discussion_text = discussion_res.choices[0].message.content.strip()
+        
+        # Combine the results and discussion
+        final_result = {
+            "chapter_id": chapter_id,
+            "versions": [v[0] for v in versions],
+            "critic_A_rankings": ranking_data_a,
+            "critic_B_rankings": ranking_data_b,
+            "discussion": discussion_text,
+            # Use the first critic's rankings as the "official" ones
+            "table": ranking_data_a.get("table", []),
+            "analysis": ranking_data_a.get("analysis", ""),
+            "feedback": ranking_data_a.get("feedback", {})
+        }
+        
+        return final_result
+        
+    except Exception as e:
+        log.error(f"LLM call failed for chapter {chapter_id}: {e}")
+        return {
+            "chapter_id": chapter_id,
+            "versions": [v[0] for v in versions],
+            "error": f"LLM ranking failed: {e}"
+        }
+
+def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
+    """
+    Generate an HTML report for all chapter rankings.
+    
+    Args:
+        rankings: List of rankings data for different chapters
+        
+    Returns:
+        HTML string for the report
+    """
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter Version Rankings</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { 
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .chapter-card {
+            margin-bottom: 40px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .card-header {
+            font-weight: bold;
+            background-color: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .rankings-table {
+            margin: 0;
+        }
+        .analysis-block {
+            padding: 20px;
+            background-color: #fff9db;
+            border-left: 4px solid #ffd43b;
+            margin: 15px 20px;
+            border-radius: 5px;
+        }
+        .feedback-block {
+            padding: 20px;
+            background-color: #f8f9fa;
+            margin: 15px 20px;
+            border-radius: 5px;
+        }
+        .feedback-item {
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .feedback-item:last-child {
+            border-bottom: none;
+        }
+        .rank-1 {
+            background-color: #fff4e6;
+        }
+        .rank-1 td:first-child {
+            position: relative;
+        }
+        .rank-1 td:first-child::before {
+            content: "🏆";
+            position: absolute;
+            left: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .rank-badge {
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 12px;
+            display: inline-block;
+            min-width: 30px;
+            text-align: center;
+        }
+        .badge-1 { background-color: gold; color: #333; }
+        .badge-2 { background-color: #C0C0C0; color: #333; }
+        .badge-3 { background-color: #CD7F32; color: white; }
+        .badge-other { background-color: #e9ecef; color: #333; }
+        .raw-json {
+            display: none;
+            font-family: monospace;
+            white-space: pre-wrap;
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 20px;
+            max-height: 300px;
+            overflow: auto;
+        }
+        .json-toggle {
+            cursor: pointer;
+            text-decoration: underline;
+            color: #0d6efd;
+            margin-left: 20px;
+            font-size: 0.9em;
+        }
+        .score-cell {
+            text-align: center;
+            font-weight: bold;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.8em;
+            margin-bottom: 20px;
+        }
+        h1 { margin-bottom: 20px; }
+        h2 { 
+            margin-top: 40px; 
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .critic-a {
+            background-color: #e7f5ff;
+            border-left: 4px solid #74c0fc;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        .critic-b {
+            background-color: #f8f9fa;
+            border-left: 4px solid #adb5bd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        .discussion {
+            background-color: #fff9db;
+            border-left: 4px solid #ffd43b;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+        }
+        .nav-tabs {
+            margin-bottom: 20px;
+        }
+        .tab-content {
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            border-top: none;
+            border-radius: 0 0 5px 5px;
+        }
+    </style>
+    <script>
+        function toggleJson(chapterId) {
+            const jsonElem = document.getElementById('json-' + chapterId);
+            if (jsonElem.style.display === 'none' || jsonElem.style.display === '') {
+                jsonElem.style.display = 'block';
+            } else {
+                jsonElem.style.display = 'none';
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Chapter Version Rankings</h1>
+        <div class="timestamp">Generated on: """ + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</div>
+"""
+
+    # Summary section: total chapters analyzed
+    html += f"""
+        <div class="alert alert-info">
+            <strong>{len(rankings)}</strong> chapters analyzed with multiple versions
+        </div>
+        
+        <h2>Chapters</h2>
+"""
+
+    # Generate a section for each chapter
+    for ranking in rankings:
+        chapter_id = ranking.get("chapter_id", "Unknown")
+        
+        # Skip if error occurred
+        if "error" in ranking:
+            html += f"""
+        <div class="card chapter-card">
+            <div class="card-header">
+                Chapter: {chapter_id}
+            </div>
+            <div class="card-body">
+                <div class="alert alert-danger">
+                    <strong>Error:</strong> {ranking.get("error", "Unknown error")}
+                </div>
+                <div class="raw-json" id="json-{chapter_id}">
+                    {json.dumps(ranking, indent=2)}
+                </div>
+                <div class="json-toggle" onclick="toggleJson('{chapter_id}')">Show Raw JSON</div>
+            </div>
+        </div>
+"""
+            continue
+        
+        # Build ranking table using the main table from critic A
+        table_html = """
+                <ul class="nav nav-tabs" id="resultTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="consensus-tab" data-bs-toggle="tab" 
+                                data-bs-target="#consensus" type="button" role="tab" 
+                                aria-controls="consensus" aria-selected="true">Consensus Rankings</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="critic-a-tab" data-bs-toggle="tab" 
+                                data-bs-target="#critic-a" type="button" role="tab" 
+                                aria-controls="critic-a" aria-selected="false">Critic A (Technical)</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="critic-b-tab" data-bs-toggle="tab" 
+                                data-bs-target="#critic-b" type="button" role="tab" 
+                                aria-controls="critic-b" aria-selected="false">Critic B (Creative)</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="discussion-tab" data-bs-toggle="tab" 
+                                data-bs-target="#discussion" type="button" role="tab" 
+                                aria-controls="discussion" aria-selected="false">Critics Discussion</button>
+                    </li>
+                </ul>
+                <div class="tab-content" id="resultTabsContent">
+                    <div class="tab-pane fade show active" id="consensus" role="tabpanel" aria-labelledby="consensus-tab">
+"""
+        
+        # Process ranking table
+        table_entries = ranking.get("table", [])
+        
+        # Add consensus table
+        table_html += """
+                        <table class="table table-striped rankings-table">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Version</th>
+                                    <th>Clarity</th>
+                                    <th>Tone</th>
+                                    <th>Faithfulness</th>
+                                    <th>Overall</th>
+                                    <th>Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+"""
+        
+        for entry in table_entries:
+            rank = entry.get("rank", 0)
+            draft_id = entry.get("id", "")
+            
+            # Extract the persona name from DRAFT_persona format
+            persona = draft_id.replace("DRAFT_", "") if draft_id.startswith("DRAFT_") else draft_id
+            
+            # Get scores
+            clarity = entry.get("clarity", 0)
+            tone = entry.get("tone", 0)
+            faithfulness = entry.get("faithfulness", 0)
+            overall = entry.get("overall", 0)
+            total = clarity + tone + faithfulness + overall
+            
+            # Determine badge class
+            badge_class = f"badge-{rank}" if rank <= 3 else "badge-other"
+            
+            # Add table row
+            table_html += f"""
+                                <tr class="{'rank-1' if rank == 1 else ''}">
+                                    <td style="padding-left: 30px;"><span class="rank-badge {badge_class}">{rank}</span></td>
+                                    <td>{persona}</td>
+                                    <td class="score-cell">{clarity}</td>
+                                    <td class="score-cell">{tone}</td>
+                                    <td class="score-cell">{faithfulness}</td>
+                                    <td class="score-cell">{overall}</td>
+                                    <td class="score-cell">{total}</td>
+                                </tr>
+"""
+        
+        table_html += """
+                            </tbody>
+                        </table>
+                        
+                        <h4>Winner Analysis</h4>
+                        <div class="analysis-block">
+"""
+        
+        # Get analysis and feedback
+        analysis = ranking.get("analysis", "No analysis provided.")
+        feedback = ranking.get("feedback", {})
+        
+        table_html += f"""
+                            {analysis}
+                        </div>
+                        
+                        <h4>Feedback for Other Versions</h4>
+                        <div class="feedback-block">
+"""
+        
+        # Build feedback HTML
+        for draft_id, fb_text in feedback.items():
+            # Extract persona name
+            persona = draft_id.replace("DRAFT_", "") if draft_id.startswith("DRAFT_") else draft_id
+            table_html += f"""
+                            <div class="feedback-item">
+                                <strong>{persona}:</strong> {fb_text}
+                            </div>
+"""
+        
+        table_html += """
+                        </div>
+                    </div>
+"""
+        
+        # Add Critic A tab content
+        if "critic_A_rankings" in ranking:
+            critic_a = ranking["critic_A_rankings"]
+            critic_a_table = critic_a.get("table", [])
+            
+            table_html += """
+                    <div class="tab-pane fade" id="critic-a" role="tabpanel" aria-labelledby="critic-a-tab">
+                        <div class="critic-a">
+                            <h4>Critic A: Technical Writing & Clarity</h4>
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Version</th>
+                                        <th>Clarity</th>
+                                        <th>Tone</th>
+                                        <th>Faithfulness</th>
+                                        <th>Overall</th>
+                                        <th>Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+"""
+            
+            for entry in critic_a_table:
+                rank = entry.get("rank", 0)
+                draft_id = entry.get("id", "")
+                persona = draft_id.replace("DRAFT_", "") if draft_id.startswith("DRAFT_") else draft_id
+                clarity = entry.get("clarity", 0)
+                tone = entry.get("tone", 0)
+                faithfulness = entry.get("faithfulness", 0)
+                overall = entry.get("overall", 0)
+                total = clarity + tone + faithfulness + overall
+                
+                badge_class = f"badge-{rank}" if rank <= 3 else "badge-other"
+                
+                table_html += f"""
+                                    <tr class="{'rank-1' if rank == 1 else ''}">
+                                        <td style="padding-left: 30px;"><span class="rank-badge {badge_class}">{rank}</span></td>
+                                        <td>{persona}</td>
+                                        <td class="score-cell">{clarity}</td>
+                                        <td class="score-cell">{tone}</td>
+                                        <td class="score-cell">{faithfulness}</td>
+                                        <td class="score-cell">{overall}</td>
+                                        <td class="score-cell">{total}</td>
+                                    </tr>
+"""
+            
+            table_html += """
+                                </tbody>
+                            </table>
+                            
+                            <h5>Analysis</h5>
+                            <p>""" + critic_a.get("analysis", "No analysis provided.") + """</p>
+                        </div>
+                    </div>
+"""
+        
+        # Add Critic B tab content
+        if "critic_B_rankings" in ranking:
+            critic_b = ranking["critic_B_rankings"]
+            critic_b_table = critic_b.get("table", [])
+            
+            table_html += """
+                    <div class="tab-pane fade" id="critic-b" role="tabpanel" aria-labelledby="critic-b-tab">
+                        <div class="critic-b">
+                            <h4>Critic B: Creative Writing & Atmosphere</h4>
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Version</th>
+                                        <th>Clarity</th>
+                                        <th>Tone</th>
+                                        <th>Faithfulness</th>
+                                        <th>Overall</th>
+                                        <th>Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+"""
+            
+            for entry in critic_b_table:
+                rank = entry.get("rank", 0)
+                draft_id = entry.get("id", "")
+                persona = draft_id.replace("DRAFT_", "") if draft_id.startswith("DRAFT_") else draft_id
+                clarity = entry.get("clarity", 0)
+                tone = entry.get("tone", 0)
+                faithfulness = entry.get("faithfulness", 0)
+                overall = entry.get("overall", 0)
+                total = clarity + tone + faithfulness + overall
+                
+                badge_class = f"badge-{rank}" if rank <= 3 else "badge-other"
+                
+                table_html += f"""
+                                    <tr class="{'rank-1' if rank == 1 else ''}">
+                                        <td style="padding-left: 30px;"><span class="rank-badge {badge_class}">{rank}</span></td>
+                                        <td>{persona}</td>
+                                        <td class="score-cell">{clarity}</td>
+                                        <td class="score-cell">{tone}</td>
+                                        <td class="score-cell">{faithfulness}</td>
+                                        <td class="score-cell">{overall}</td>
+                                        <td class="score-cell">{total}</td>
+                                    </tr>
+"""
+            
+            table_html += """
+                                </tbody>
+                            </table>
+                            
+                            <h5>Analysis</h5>
+                            <p>""" + critic_b.get("analysis", "No analysis provided.") + """</p>
+                        </div>
+                    </div>
+"""
+        
+        # Add discussion tab content
+        if "discussion" in ranking:
+            discussion = ranking["discussion"]
+            
+            table_html += """
+                    <div class="tab-pane fade" id="discussion" role="tabpanel" aria-labelledby="discussion-tab">
+                        <h4>Critics' Discussion</h4>
+                        <div class="discussion">
+                        """ + discussion.replace("\n", "<br>") + """
+                        </div>
+                    </div>
+"""
+        
+        # Close the tab content div
+        table_html += """
+                </div>
+                <div class="raw-json" id="json-""" + chapter_id + """">
+                    """ + json.dumps(ranking, indent=2) + """
+                </div>
+                <div class="json-toggle" onclick="toggleJson('""" + chapter_id + """')">Show Raw JSON</div>
+"""
+        
+        # Add chapter card to HTML
+        html += f"""
+        <div class="card chapter-card">
+            <div class="card-header">
+                Chapter: {chapter_id}
+            </div>
+            <div class="card-body">
+                {table_html}
+            </div>
+        </div>
+"""
+    
+    # Add Bootstrap JavaScript for tabs
+    html += """
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    </div>
+</body>
+</html>
+"""
+    
+    return html
+
+def rank_all_chapters(output_path: pathlib.Path, addl_dirs: Optional[pathlib.Path] = None, max_versions: int = 0) -> None:
+    """
+    Rank all available chapter versions and generate an HTML report.
+    
+    Args:
+        output_path: Path to save the HTML report
+        addl_dirs: Directory containing additional drafts for comparison (structure: addl_dirs/draft_type/chapter.txt)
+        max_versions: Maximum number of versions to compare per chapter (0 = no limit)
+    """
+    log.info("Gathering all final chapter versions...")
+    chapters_map = gather_final_versions()
+    
+    # Add additional drafts if provided
+    if addl_dirs and addl_dirs.exists():
+        log.info(f"Looking for additional drafts in {addl_dirs}")
+        for draft_type_dir in addl_dirs.iterdir():
+            if not draft_type_dir.is_dir():
+                continue
+                
+            draft_type = draft_type_dir.name
+            log.info(f"Processing additional draft type: {draft_type}")
+            
+            # Look for chapter files in this draft directory
+            for chapter_file in draft_type_dir.glob("*.txt"):
+                chapter_id = chapter_file.stem
+                
+                # Skip files that aren't likely chapters (sanity reports, logs, etc.)
+                if any(non_chapter in chapter_id.lower() for non_chapter in ["sanity", "status", "log", "report", "editor"]):
+                    log.info(f"Skipping non-chapter file: {chapter_file}")
+                    continue
+                    
+                if chapter_id not in chapters_map:
+                    chapters_map[chapter_id] = []
+                    
+                chapter_text = read_utf8(chapter_file)
+                # Use an empty voice spec for additional drafts
+                voice_spec = ""
+                
+                # Add this as a version for the chapter
+                chapters_map[chapter_id].append((f"addl_{draft_type}", chapter_text, voice_spec))
+                log.info(f"Added additional draft '{draft_type}' for chapter {chapter_id}")
+    
+    if not chapters_map:
+        log.error("No chapters found with multiple versions")
+        return
+        
+    log.info(f"Found {len(chapters_map)} chapters with multiple versions")
+    
+    # Process each chapter
+    rankings = []
+    with tqdm(total=len(chapters_map), desc="Ranking chapters") as progress:
+        for chapter_id, versions in chapters_map.items():
+            if len(versions) < 2:
+                log.warning(f"Chapter {chapter_id} has only {len(versions)} version(s), skipping")
+                progress.update(1)
+                continue
+                
+            # Limit the number of versions to compare (if too many)
+            if max_versions > 0 and len(versions) > max_versions:
+                log.warning(f"Chapter {chapter_id} has {len(versions)} versions, limiting to {max_versions}")
+                versions = versions[:max_versions]
+                
+            log.info(f"Ranking {len(versions)} versions of chapter {chapter_id}")
+            try:
+                ranking = rank_chapter_versions(chapter_id, versions)
+                rankings.append(ranking)
+            except Exception as e:
+                log.error(f"Failed to rank chapter {chapter_id}: {e}")
+                # Add detailed error info with traceback
+                import traceback
+                log.error(f"Traceback: {traceback.format_exc()}")
+                rankings.append({
+                    "chapter_id": chapter_id,
+                    "versions": [v[0] for v in versions],
+                    "error": f"Ranking failed: {e}"
+                })
+            progress.update(1)
+    
+    # Generate HTML report
+    log.info("Generating HTML report...")
+    html_content = generate_ranking_html(rankings)
+    
+    # Save HTML report
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+        
+    log.info(f"Ranking report saved to {output_path}")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("chapters", nargs="*", help="Chapter IDs to compare (e.g. lotm_0001)")
@@ -434,7 +1213,38 @@ def main():
     ap.add_argument("--output", help="Output file path (HTML format)")
     ap.add_argument("--format", choices=["html", "json"], default="html", 
                     help="Output format: html (default) or json")
+    ap.add_argument("--all-finals", action="store_true", 
+                    help="Rank all final versions of all chapters")
+    ap.add_argument("--addl-dirs", help="Directory containing additional drafts for comparison (structure: addl_dirs/draft_type/chapter.txt)")
+    ap.add_argument("--max-versions", type=int, default=0,
+                    help="Maximum number of versions to compare per chapter (0 = no limit)")
     args = ap.parse_args()
+    
+    # Handle the all-finals mode
+    if args.all_finals:
+        # Determine output path
+        if args.output:
+            out_path = pathlib.Path(args.output)
+            # Add .html extension if not specified
+            if not out_path.suffix:
+                out_path = pathlib.Path(str(out_path) + ".html")
+        else:
+            # Create default output file
+            out_dir = ROOT / "drafts" / "comparisons"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_path = out_dir / f"ranking_all_finals_{timestamp}.html"
+        
+        # Run the ranking process
+        try:
+            # Pass additional directories if specified
+            addl_dirs = pathlib.Path(args.addl_dirs) if args.addl_dirs else None
+            max_versions = args.max_versions
+            rank_all_chapters(out_path, addl_dirs, max_versions)
+        except Exception as e:
+            log.error(f"Error ranking chapters: {e}")
+            sys.exit(1)
+        return
     
     # Check if we're doing a directory-based comparison
     if args.dir1 and args.dir2:

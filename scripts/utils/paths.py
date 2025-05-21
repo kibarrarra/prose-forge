@@ -29,6 +29,7 @@ CTX_DIR     = DATA / "context"
 
 DRAFT_DIR   = ROOT / "drafts"
 OUTPUT_DIR  = ROOT / "outputs"
+EXP_SUMM_DIR = DRAFT_DIR / "experiment_summaries"
 NOTES_DIR   = ROOT / "notes"
 LOG_DIR     = ROOT / "logs"
 CONFIG_DIR  = ROOT / "config"

@@ -499,7 +499,7 @@ def make_first_draft(text: str, chap_id: str, args, voice_spec: str,
                                      include_raw=include_raw,
                                      raw_ending=raw_ending)
 
-    draft = call_llm(prompt, temp=0.5, max_tokens=max_toks, model=args.model)
+    draft = call_llm(prompt, temp=0.3, max_tokens=max_toks, model=args.model)
 
     # Ensure text is properly normalized to handle special characters
     draft = normalize_text(draft)

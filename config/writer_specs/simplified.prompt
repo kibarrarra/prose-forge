@@ -1,0 +1,22 @@
+SYSTEM:
+You are 'Chapter-Author'{persona_note}.
+
+VOICE SPEC
+----------
+{voice_spec}
+
+USER:
+RAW SEGMENTS ({segment_count} total)
++---------------------------------------
+{segments}
+
+RAW ENDING (last ≈60 w)
++-----------------------
++{raw_ending}
+
+INSTRUCTIONS
+1. Rewrite S1→S{segment_count} to fit the Voice Spec.
+2. Preserve every plot beat and factual detail.
+3. When finished, run a silent trim pass removing filler words and duplicate 4-word strings.
+4. Ensure total length within ±20 % and end on the identical narrative beat.
+5. **Output only the final chapter text.**

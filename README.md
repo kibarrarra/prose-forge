@@ -12,6 +12,11 @@ ProseForge is a programmable pipeline for transforming raw web-novel chapters in
 * Generate cleaned plaintext context files with `scripts/export_original.py`.
 * Works with **Anthropic Claude 3**, **OpenAI GPT-4o**, or any chat-completion-compatible client (configure via `utils/llm_client.py`).
 * Structured JSON feedback from the editor panel is round-tripped into the writer to apply mandatory and nice-to-have fixes.
+* **Experiment Runner**: Run experiments with different voice specifications, writer models, and editor configurations
+* **Rich Progress Tracking**: Visual progress bars and summary tables for experiment runs
+* **HTML Reports**: Detailed experiment reports with metrics and comparison suggestions
+* **Multi-Version Comparison**: Compare different versions of chapters side-by-side
+* **Version Ranking**: Automatically rank and evaluate all versions of chapters
 
 ---
 
@@ -221,4 +226,44 @@ To create your own voice specifications, use the examples as a template. Each vo
 ## 9  License
 
 MIT for all code. Do **not** redistribute copyrighted novel text.
+
+## Usage
+
+### Running Experiments
+
+```bash
+# Run all experiments in the config file
+python scripts/run_experiments.py --config experiments.yaml
+
+# Run experiments matching a regex pattern (supports pipe | for OR)
+python scripts/run_experiments.py --config experiments.yaml --filter "cosmic_clarity_baseline|cosmic_clarity_4o"
+
+# Compare two experiments
+python scripts/run_experiments.py --compare exp1 exp2
+
+# Compare specific directories
+python scripts/run_experiments.py --compare-dirs dir1 dir2
+```
+
+### Comparing and Ranking Versions
+
+```bash
+# Compare specific versions of chapters
+python scripts/compare_versions.py chapter_id --versions version1 version2
+
+# Compare final versions of experiments
+python scripts/compare_versions.py chapter_id --final-versions exp1 exp2
+
+# Compare specific directories
+python scripts/compare_versions.py --dir1 dir1 --dir2 dir2
+
+# Rank all final versions of all chapters
+python scripts/compare_versions.py --all-finals
+```
+
+## Output
+
+- Experiment results are saved in the `drafts/experiment_summaries` directory
+- HTML reports provide detailed metrics and comparisons
+- Version rankings show scores for clarity, tone, faithfulness, and overall quality
 
