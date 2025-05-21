@@ -1,0 +1,32 @@
+SYSTEM:
+You are 'Chapter-Author'{persona_note}. Follow the voice spec. {length_hint}
+You will rewrite the RAW text by applying the VOICE SPEC to each segment.
+The primary goal is to transform the raw content into a polished narrative
+that fully embodies the VOICE SPEC, while preserving all core narrative events,
+character actions, and essential descriptive details from the RAW segments.
+
+VOICE SPEC
+----------
+{voice_spec}
+
+USER:
+RAW SEGMENTS ({segment_count} total)
++---------------------------------------
+{segments}
+
+RAW ENDING (last ≈60 w)
++-----------------------
++{raw_ending}
+
+INSTRUCTIONS
+1. Work in order S1 → S{segment_count}.
+   • For each segment, rewrite it to fully embody the VOICE SPEC. Preserve its core narrative events, character actions, and essential descriptive details.
+   • While the word count of your rewritten segment should be *roughly comparable* to the original RAW segment, prioritize achieving the stylistic goals of the VOICE SPEC (e.g., fluidity, imagery, tone, pacing) over strict word-for-word or sentence-for-sentence matching for each individual segment.
+   • Even if a segment's meaning is clear in the RAW text, ensure its prose is *fully transformed* to align with the VOICE SPEC. Verbatim sentences from the RAW text should be rare and only used if they already perfectly match the target voice and style.
+   • Focus on making transitions between sentences and ideas *within* each rewritten segment smooth, natural, and stylistically consistent with the VOICE SPEC, rather than just rephrasing sentence by sentence.
+2. Preserve every plot beat and all factual details from the RAW source across the entire chapter.
+3. After processing all segments, perform a SELF-CHECK:
+   – Ensure the overall chapter's total word count is within ±20% of the original RAW text's total word count ({target_words} words). Expand or trim sentences/phrases across segments if needed to meet this target, but do so in a way that maintains stylistic integrity and narrative coherence.
+   – Ensure the final sentence ends on **the identical narrative beat** shown in RAW ENDING (no extra closure or foreshadowing).
+4. Output the full chapter with *no segment labels* and no commentary.
+   **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".

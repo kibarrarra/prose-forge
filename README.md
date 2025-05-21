@@ -134,7 +134,7 @@ Experiments are defined in `experiments.yaml`:
 ```yaml
 experiments:
   - name: cosmic_clarity_standard
-    writer_spec: config/writer_specs/standard.json
+    writer_spec: config/writer_specs/standard.prompt
     editor_spec: config/editor_specs/assertive.md
     voice_spec: config/voice_specs/cosmic_clarity.md
     model: claude-3-opus-20240229
@@ -175,7 +175,7 @@ prose-forge/
 │           └── final/
 ├── config/
 │   ├── voice_specs/*.md     # tone/voice definitions
-│   ├── writer_specs/*.json  # writer prompt configurations with system prompts, instructions, and self-checks
+│   ├── writer_specs/*.prompt  # writer prompt templates with placeholders
 │   └── editor_specs/*.md    # editor/critic prompt templates
 ├── examples/                # sample files to demonstrate usage
 │   ├── raw/                 # sample chapter in JSON format
