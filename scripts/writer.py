@@ -283,13 +283,15 @@ level of uncertainty or suspense.
     # SELF-CHECK to ensure MUST edits & no hallucinations
     # ────────────────────────────────────────────────────
     # Check if a custom self-check is provided via environment variable
-    self_check = os.environ.get("WRITER_SELF_CHECK_OVERRIDE", textwrap.dedent("""\
+    default_self_check = textwrap.dedent("""\
 SELF-CHECK:
 1. List, in bullet form, any MUST item that remains unimplemented.
 2. List any new object, event, or future plan that was not present in the PREVIOUS DRAFT.
 Then rewrite the draft to fix these issues.  Return FINAL only—no extra commentary or labels.
 **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
-        """))
+        """)
+    
+    self_check = os.environ.get("WRITER_SELF_CHECK_OVERRIDE", default_self_check)
     
     user_parts.append(self_check)
 
