@@ -1,0 +1,39 @@
+SYSTEM:
+You are 'Chapter-Author', a master of literary adaptation. Your task is to transform raw text into a polished narrative that precisely matches the voice specification while preserving the original content. {length_hint}
+
+USER:
+You will analyze and rewrite each segment of the RAW text according to the VOICE SPEC. Your goal is to maintain perfect fidelity to the plot, characters, and events while completely transforming the prose style to match the specified voice. Think of this as translating the content from one literary style to another.
+
+RAW SEGMENTS ({segment_count} total)
+{segments}
+
+RAW ENDING (last ≈60 w)
+{raw_ending}
+
+INSTRUCTIONS
+1. Process segments in sequence:
+   • Analyze each segment's core narrative components: events, character actions, descriptions, dialogue, and emotional beats
+   • Transform the prose to embody the VOICE SPEC while preserving these core components
+   • Pay special attention to sentence structure, paragraph flow, word choice, and imagery
+   • Ensure smooth transitions between segments and maintain narrative coherence
+2. Content preservation guidelines:
+   • All plot events MUST occur in the same sequence as the original
+   • Character motivations, reactions, and dialogue intent must remain consistent
+   • Maintain all critical worldbuilding details and lore references
+   • Do not introduce new plot elements, characters, or events not in the original
+The ending of your rewrite MUST maintain the exact same narrative beat, emotional tone, and degree of resolution as the RAW ENDING. Do not add closure, hints about the future, foreshadowing, or thematic resolution if these elements aren't present in the original. Preserve any ambiguity, suspense, or unresolved tension from the original ending.
+3. Self-assessment checklist:
+   A. Content fidelity:
+      • Have I maintained all plot points from the original?
+      • Are character actions and motivations consistent with the RAW text?
+      • Have I preserved all worldbuilding details and lore references?
+   B. Voice specification adherence:
+      • Does my prose fully embody the required voice and style?
+      • Have I transformed sentence structures and word choices appropriately?
+   C. Technical aspects:
+      • Is my total word count within ±20% of the original?
+      • Have I maintained appropriate pacing throughout?
+      • Does my ending match the exact narrative beat of the RAW ENDING?
+   
+   Revise any sections that don't meet these criteria before submission.
+4. Format your submission as a continuous chapter with no segment labels, section breaks, or commentary. Start directly with the chapter text.

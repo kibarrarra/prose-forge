@@ -70,28 +70,10 @@ def filter_experiments(experiments: List[Dict[str, Any]], filter_term: str) -> L
             
     return filtered
 
-def load_json_spec(file_path: str) -> Dict[str, Any]:
-    """Load a JSON spec file."""
-    with open(file_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-def process_writer_spec(spec: Dict[str, Any], variables: Dict[str, Any]) -> Dict[str, Any]:
-    """Process a writer spec, applying variable substitutions."""
-    processed = {}
-    
-    # Process system prompt
-    if "system_prompt" in spec:
-        # Get the length hint if provided, otherwise use a sensible default
-        length_hint = variables.get("length_hint", "Match the source length appropriately")
-        # The only variable we're using now is length_hint
-        processed["system_prompt"] = spec["system_prompt"].replace("{{length_hint}}", length_hint)
-    
-    # Copy the rest without variable substitution
-    for key in ["instructions", "self_check", "model"]:
-        if key in spec:
-            processed[key] = spec[key]
-    
-    return processed
+def load_text_spec(file_path: str) -> str:
+    """Load a plain text writer spec template."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
 
 def run_sanity_checker(
     draft_dir: pathlib.Path,
@@ -222,8 +204,8 @@ def run_experiment(experiment: Dict[str, Any], output_dir: pathlib.Path) -> None
     with open(audition_dir / "config.json", 'w', encoding='utf-8') as f:
         json.dump(experiment, f, indent=2)
     
-    # Load writer spec
-    writer_spec = load_json_spec(writer_spec_path)
+    # Load writer spec template
+    writer_spec = load_text_spec(writer_spec_path)
     
     # Load editor spec
     with open(editor_spec_path, 'r', encoding='utf-8') as f:
@@ -242,9 +224,6 @@ def run_experiment(experiment: Dict[str, Any], output_dir: pathlib.Path) -> None
             # Copy the voice spec into the directory
             shutil.copy(voice_spec_path, current_dir / "voice_spec.md")
             
-            # Process writer spec with variables
-            processed_writer_spec = process_writer_spec(writer_spec, {"length_hint": "Match the source length appropriately"})
-            
             # Run writer for the first and only draft
             run_writer_for_round(
                 chapter=chapter,
@@ -253,7 +232,7 @@ def run_experiment(experiment: Dict[str, Any], output_dir: pathlib.Path) -> None
                 output_dir=current_dir,
                 prev_round_dir=None,
                 critic_feedback=None,
-                writer_spec=processed_writer_spec,
+                writer_spec=writer_spec,
                 model=model
             )
             
@@ -270,9 +249,6 @@ def run_experiment(experiment: Dict[str, Any], output_dir: pathlib.Path) -> None
             
             # Copy the voice spec into the round directory (as required by writer.py)
             shutil.copy(voice_spec_path, current_round_dir / "voice_spec.md")
-            
-            # Process writer spec with variables
-            processed_writer_spec = process_writer_spec(writer_spec, {"length_hint": "Match the source length appropriately"})
             
             # For rounds after the first, check for critic feedback from the previous round
             critic_feedback_path = None
@@ -296,7 +272,7 @@ def run_experiment(experiment: Dict[str, Any], output_dir: pathlib.Path) -> None
                 output_dir=current_round_dir,
                 prev_round_dir=prev_round_dir,
                 critic_feedback=critic_feedback_path,
-                writer_spec=processed_writer_spec,
+                writer_spec=writer_spec,
                 model=model
             )
             
@@ -331,7 +307,7 @@ def run_experiment(experiment: Dict[str, Any], output_dir: pathlib.Path) -> None
                 chapters=[chapter],
                 last_round_dir=prev_round_dir,
                 final_dir=final_dir,
-                writer_spec=processed_writer_spec,
+                writer_spec=writer_spec,
                 model=model
             )
             
@@ -356,7 +332,7 @@ def run_writer_for_round(
     output_dir: pathlib.Path,
     prev_round_dir: Optional[pathlib.Path] = None,
     critic_feedback: Optional[pathlib.Path] = None,
-    writer_spec: Optional[Dict[str, Any]] = None,
+    writer_spec: Optional[str] = None,
     model: Optional[str] = None
 ) -> None:
     """Run the writer script for a specific round of an experiment."""
@@ -414,18 +390,9 @@ def run_writer_for_round(
     if project_root_str not in python_path.split(os.pathsep):
         env["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{python_path}"
     
-    # Add writer spec components as environment variables if provided
+    # Add writer prompt template for writer.py if provided
     if writer_spec:
-        # For segment mode or first draft
-        if is_first_pass:
-            env["WRITER_SELF_CHECK_OVERRIDE"] = writer_spec["self_check"]["segment_mode"]
-        # For revision mode
-        else:
-            env["WRITER_SELF_CHECK_OVERRIDE"] = writer_spec["self_check"]["revision"]
-        
-        # Set model override from spec if not explicitly provided
-        if not model and "model" in writer_spec:
-            env["WRITER_MODEL"] = writer_spec["model"]
+        env["WRITER_PROMPT_TEMPLATE"] = writer_spec
     
     # Log environment variables and command for debugging
     log_dir = pathlib.Path("logs/run_experiments")
@@ -444,7 +411,7 @@ def run_writer_for_round(
         # Log the writer spec details if available
         if writer_spec:
             f.write("\nWRITER SPEC:\n")
-            f.write(json.dumps(writer_spec, indent=2, ensure_ascii=False))
+            f.write(writer_spec)
             f.write("\n")
     
     log.info(f"Writer call details saved to {log_file}")
@@ -484,7 +451,7 @@ def create_final_version(
     chapters: List[str],
     last_round_dir: pathlib.Path, 
     final_dir: pathlib.Path,
-    writer_spec: Optional[Dict[str, Any]] = None,
+    writer_spec: Optional[str] = None,
     model: Optional[str] = None
 ) -> None:
     """Generate the final version using the last round's feedback."""
@@ -563,13 +530,7 @@ def create_final_version(
         if project_root_str not in python_path.split(os.pathsep):
             env["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{python_path}"
         
-        # Add writer spec content as environment variable if needed
-        if writer_spec and "self_check" in writer_spec and "revision" in writer_spec["self_check"]:
-            env["WRITER_SELF_CHECK_OVERRIDE"] = writer_spec["self_check"]["revision"]
-        
-        # Set model override from spec if not explicitly provided
-        if not model and writer_spec and "model" in writer_spec:
-            env["WRITER_MODEL"] = writer_spec["model"]
+
         
         subprocess.run(cmd, check=True, cwd=ROOT, env=env)
 

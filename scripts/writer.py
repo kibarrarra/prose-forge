@@ -222,10 +222,11 @@ VOICE SPEC
     labelled = []
     for idx, seg in enumerate(raw_segments, 1):
         labelled.append(f"[S{idx}]\n{seg}")
+    labelled_str = "\n\n".join(labelled)
 
     user = f"""RAW SEGMENTS ({len(raw_segments)} total)
 +---------------------------------------
-+{'\n\n'.join(labelled)}
+{labelled_str}
 
 RAW ENDING (last ≈60 w)
 +-----------------------
@@ -239,7 +240,7 @@ INSTRUCTIONS
    • Focus on making transitions between sentences and ideas *within* each rewritten segment smooth, natural, and stylistically consistent with the VOICE SPEC, rather than just rephrasing sentence by sentence.
 2. Preserve every plot beat and all factual details from the RAW source across the entire chapter.
 3. After processing all segments, perform a SELF-CHECK:
-   – Ensure the overall chapter's total word count is within ±20% of the original RAW text's total word count ({length_hint.split('≈')[-1].split(' ')[0]} words). Expand or trim sentences/phrases across segments if needed to meet this target, but do so in a way that maintains stylistic integrity and narrative coherence.
+   – Ensure the overall chapter's total word count is within ±20% of the original RAW text's total word count ({target_words} words). Expand or trim sentences/phrases across segments if needed to meet this target, but do so in a way that maintains stylistic integrity and narrative coherence.
    – Ensure the final sentence ends on **the identical narrative beat** shown in RAW ENDING (no extra closure or foreshadowing).
 4. Output the full chapter with *no segment labels* and no commentary.
    **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
@@ -247,6 +248,51 @@ INSTRUCTIONS
 
     return [{"role": "system", "content": system},
             {"role": "user",   "content": user}]
+
+def _substitute(text: str, variables: dict) -> str:
+    """Replace {{placeholders}} in *text* using *variables*."""
+    for k, v in variables.items():
+        text = text.replace(f"{{{{{k}}}}}", str(v))
+    return text
+
+def build_segment_prompt_from_template(
+    raw_segments: list[str],
+    voice_spec: str,
+    length_hint: str,
+    persona: str | None,
+    raw_ending: str,
+    target_words: int,
+    template: str,
+) -> list[dict]:
+    """Build a segment prompt from a string template with placeholders."""
+    persona_note = f" as {persona}" if persona else ""
+
+    labelled = [f"[S{i}]\n{seg}" for i, seg in enumerate(raw_segments, 1)]
+
+    variables = {
+        "voice_spec": voice_spec,
+        "length_hint": length_hint,
+        "persona_note": persona_note,
+        "segment_count": len(raw_segments),
+        "segments": "\n\n".join(labelled),
+        "raw_ending": raw_ending,
+        "target_words": target_words,
+    }
+
+    content = _substitute(template, variables)
+
+    if "USER:" in content:
+        system_part, user_part = content.split("USER:", 1)
+        system_part = system_part.replace("SYSTEM:", "", 1).strip()
+        user_part = user_part.strip()
+    else:
+        system_part = content.strip()
+        user_part = ""
+
+    return [
+        {"role": "system", "content": system_part},
+        {"role": "user", "content": user_part},
+    ]
 
 def build_revision_prompt(current: str, change_list: dict, voice_spec: str, raw_ending: str | None = None) -> list[dict]:
     system = textwrap.dedent(f"""\
@@ -418,16 +464,29 @@ def make_first_draft(text: str, chap_id: str, args, voice_spec: str,
     # extract raw ending ~60 words
     raw_ending = " ".join(text.split()[-60:]) if include_raw else None
 
+    writer_template = os.environ.get("WRITER_PROMPT_TEMPLATE")
+
     # Determine prompt based on whether segmented drafting is enabled
     if args.segmented_first_draft:
         raw_segs = segment_text(text, args.chunk_size or 250)
         # Ensure raw_ending is extracted from the full original text
         raw_ending_full = " ".join(text.split()[-60:])
-        prompt = build_segment_author_prompt(raw_segs,
-                                             voice_spec,
-                                             length_hint,
-                                             args.persona,
-                                             raw_ending_full)
+        if writer_template:
+            prompt = build_segment_prompt_from_template(
+                raw_segs,
+                voice_spec,
+                length_hint,
+                args.persona,
+                raw_ending_full,
+                target_words,
+                writer_template,
+            )
+        else:
+            prompt = build_segment_author_prompt(raw_segs,
+                                                 voice_spec,
+                                                 length_hint,
+                                                 args.persona,
+                                                 raw_ending_full)
     else:
         # Standard author prompt (uses raw_ending extracted earlier)
         prompt = build_author_prompt(text, voice_spec, length_hint,

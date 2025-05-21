@@ -1,6 +1,6 @@
 experiments:
   - name: example_noir
-    writer_spec: config/writer_specs/standard.json
+    writer_spec: config/writer_specs/standard.prompt
     editor_spec: config/editor_specs/baseline.md
     voice_spec: examples/voice_spec_example.md
     model: claude-3-opus-20240229  # or gpt-4o
@@ -9,7 +9,7 @@ experiments:
     rounds: 1  # Single-pass mode, no editor feedback
     
   - name: example_noir_with_feedback
-    writer_spec: config/writer_specs/standard.json
+    writer_spec: config/writer_specs/standard.prompt
     editor_spec: config/editor_specs/assertive.md
     voice_spec: examples/voice_spec_example.md
     model: claude-3-opus-20240229

@@ -19,3 +19,4 @@ models/
 drafts/
 logs/
 outputs/
+*.egg-info/
