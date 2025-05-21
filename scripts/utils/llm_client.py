@@ -130,8 +130,26 @@ class UnifiedClient:
         )
 
 
-def get_llm_client():
-    """Return a *UnifiedClient* that transparently supports OpenAI & Anthropic."""
+class _StubClient:  # pragma: no cover - trivial
+    """Return canned responses when running in test mode."""
+
+    def __init__(self, text: str = "[LLM output suppressed]"):
+        self._text = text
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, *_, **__):
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self._text))])
+
+
+def get_llm_client(test_mode: bool | None = None):
+    """Return a chat client, using a stub when *test_mode* is True."""
+
+    if test_mode is None:
+        test_mode = bool(os.getenv("PF_TEST_MODE"))
+
+    if test_mode:
+        return _StubClient()
 
     timeout = httpx.Timeout(connect=30.0, read=600.0, write=600.0, pool=60.0)
-    return UnifiedClient(timeout=timeout) 
+    return UnifiedClient(timeout=timeout)
+

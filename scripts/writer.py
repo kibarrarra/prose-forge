@@ -44,7 +44,9 @@ OUT  = DRAFT_DIR
 CFG  = CONFIG_DIR
 
 # ── OpenAI client ────────────────────────────────────────────────────────────
-client = get_llm_client()
+# Use a stub client when PF_TEST_MODE is enabled.
+TEST_MODE = bool(os.getenv("PF_TEST_MODE"))
+client = get_llm_client(test_mode=TEST_MODE)
 
 # ── utilities ────────────────────────────────────────────────────────────────
 def die(msg: str) -> None:
@@ -301,6 +303,7 @@ Then rewrite the draft to fix these issues.  Return FINAL only—no extra commen
             {"role": "user",   "content": user}]
 
 def call_llm(msgs: list[dict], temp: float, max_tokens: int, model: str) -> str:
+
     MAX_RETRIES = 3
     INITIAL_DELAY_SECS = 1
     
