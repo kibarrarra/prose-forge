@@ -24,7 +24,7 @@ Core modes
 import argparse, json, math, pathlib, re, sys, textwrap
 from utils.paths import RAW_DIR, SEG_DIR, CTX_DIR, DRAFT_DIR, CONFIG_DIR
 from typing import Optional, TypedDict
-from utils.io_helpers import read_utf8, write_utf8, normalize_text
+from utils.io_helpers import read_utf8, write_utf8, normalize_text, escape_for_fstring
 from utils.llm_client import get_llm_client
 from ftfy import fix_text
 import os
@@ -250,9 +250,12 @@ INSTRUCTIONS
             {"role": "user",   "content": user}]
 
 def _substitute(text: str, variables: dict) -> str:
-    """Replace {{placeholders}} in *text* using *variables*."""
+    """Replace {placeholders} in *text* using *variables*."""
     for k, v in variables.items():
-        text = text.replace(f"{{{{{k}}}}}", str(v))
+        # Ensure values are properly escaped for f-strings when they contain backslashes
+        if isinstance(v, str):
+            v = escape_for_fstring(v)
+        text = text.replace(f"{{{k}}}", str(v))
     return text
 
 def build_segment_prompt_from_template(

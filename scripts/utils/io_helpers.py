@@ -62,6 +62,19 @@ def normalize_text(text: str) -> str:
     
     return text
 
+def escape_for_fstring(text: str) -> str:
+    """
+    Escape text content to be safely used inside f-strings.
+    This handles newlines, backslashes and other characters that could cause issues in f-strings.
+    """
+    # Replace literal backslashes with double backslashes to ensure proper escaping in f-strings
+    text = text.replace('\\', '\\\\')
+    
+    # No need to escape newlines since we're not placing this in a raw string literal
+    # Instead, we can pass the string as is, and let Python handle the formatting
+    
+    return text
+
 def ensure_utf8_windows() -> None:
     """Force UTF-8 on Windows terminals so Unicode output is readable."""
     if sys.platform == "win32":
