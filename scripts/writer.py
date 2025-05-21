@@ -204,7 +204,8 @@ def build_segment_author_prompt(raw_segments: list[str],
                                 voice_spec: str,
                                 length_hint: str,
                                 persona: str | None,
-                                raw_ending: str) -> list[dict]:
+                                raw_ending: str,
+                                target_words: int) -> list[dict]:
     persona_note = f" as {persona}" if persona else ""
     system = f"""You are 'Chapter-Author'{persona_note}.
 Follow the voice spec. {length_hint}
@@ -489,7 +490,8 @@ def make_first_draft(text: str, chap_id: str, args, voice_spec: str,
                                                  voice_spec,
                                                  length_hint,
                                                  args.persona,
-                                                 raw_ending_full)
+                                                 raw_ending_full,
+                                                 target_words)
     else:
         # Standard author prompt (uses raw_ending extracted earlier)
         prompt = build_author_prompt(text, voice_spec, length_hint,
