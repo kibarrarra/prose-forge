@@ -25,14 +25,16 @@ from utils.paths import CTX_DIR
 from utils.logging_helper import get_logger
 from utils.llm_client import get_llm_client
 
+TEST_MODE = bool(os.getenv("PF_TEST_MODE"))
+
+client = get_llm_client(test_mode=TEST_MODE)
+
 import tiktoken
 
 log = get_logger()
 # Allow override via environment variable so we can test different models
 # without touching the source code. Falls back to the previous default.
 MODEL = os.getenv("EDITOR_MODEL", "gpt-4o-mini")   # cheap for discussion / annotation
-
-client = get_llm_client()
 
 def count_tokens(text: str) -> int:
     """Count tokens in text using GPT-4's tokenizer."""
@@ -96,6 +98,7 @@ def load_bundle(dir: pathlib.Path) -> tuple[str, str, int]:
     return "\n\n".join(combined_sections), spec, total_tokens
 
 def chat(system: str, user: str) -> str:
+
     res = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "system", "content": system},
