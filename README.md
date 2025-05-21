@@ -8,7 +8,8 @@ ProseForge is a programmable pipeline for transforming raw web-novel chapters in
 
 * End-to-end workflow from **raw scrape → segmentation → first draft → iterative critic/writer loops → final copy**.
 * Pluggable **voice specifications** (markdown files) that define tone, diction, and stylistic guard-rails.
-* Supports **multi-round auditions** across different personae / voice specs to find the best fit.
+* Supports **multi-round experiments** across different voice specs and prompts.
+* Generate cleaned plaintext context files with `scripts/export_original.py`.
 * Works with **Anthropic Claude 3**, **OpenAI GPT-4o**, or any chat-completion-compatible client (configure via `utils/llm_client.py`).
 * Structured JSON feedback from the editor panel is round-tripped into the writer to apply mandatory and nice-to-have fixes.
 
@@ -72,15 +73,24 @@ Paragraph-level segmentation gives each chunk a stable ID so later feedback can 
 
 ```powershell
 Get-ChildItem data/raw/lotm/*.json | ForEach-Object {
-    python scripts/segment.py $_ --out data/segments/lotm --mode para
+    python archive/segment.py $_ --out data/segments/lotm --mode para
 }
 ```
 
 You will get files like `lotm_0001_p001.txt`, `lotm_0001_p002.txt`, … which together equal the source chapter.
 
+### 4.1 Exporting Clean Context
+
+Run the helper below to create `data/context/<chapter>.txt` files used by the writer:
+
+```bash
+python scripts/export_original.py --all        # process every chapter
+python scripts/export_original.py lotm_0001    # just one
+```
+
 ---
 
-## 5  Writing ✍️ – First Drafts & Auditions
+## 5  Writing ✍️ – First Drafts & Experiments
 
 For a **single chapter first draft**:
 
@@ -91,22 +101,9 @@ python scripts/writer.py lotm_0001 \
        --segmented-first-draft
 ```
 
-You can run the **iterative audition loop** which automatically performs multiple writer ⇄ critic rounds and outputs a final version:
-
-```bash
-python scripts/audition_iterative.py cosmic_clarity 2 --rounds 2
-#        ───────────────┬─── ┬───────────────
-#         persona label │   │ number of chapters
-#                       │   └─ feedback rounds before final pass
-```
-
-The command above will:
-1. Create `drafts/auditions/cosmic_clarity/round_1` and write the first drafts (segmented mode).
-2. Invoke the editor panel to generate JSON feedback.
-3. Pass that feedback plus the previous draft into `writer.py` for the next round.
-4. After the configured rounds, generate a *final* version in `drafts/auditions/cosmic_clarity/final`.
-
-However, for most use cases, the more powerful `run_experiments.py` script is recommended (see next section).
+The older `audition_iterative.py` helper that automated writer ⇄ critic loops has
+been archived.  The modern workflow uses `run_experiments.py` which wraps the
+writer and optional editor panel logic into a single configurable pipeline.
 
 ---
 
@@ -181,7 +178,8 @@ prose-forge/
 │   ├── raw/                 # sample chapter in JSON format
 │   ├── segments/            # pre-segmented version of the sample chapter
 │   └── voice_spec_example.md # example voice specification
-├── scripts/                 # CLI tools (writer.py, editor_panel.py, run_experiments.py, ...)
+├── archive/                 # legacy scripts and docs
+├── scripts/                 # CLI tools (writer.py, run_experiments.py, compare_versions.py, export_original.py)
 ├── utils/                   # shared helpers
 └── experiments.yaml         # configuration for experiment runs
 ```

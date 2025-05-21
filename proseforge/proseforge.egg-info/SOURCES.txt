@@ -5,4 +5,3 @@ proseforge/proseforge.egg-info/SOURCES.txt
 proseforge/proseforge.egg-info/dependency_links.txt
 proseforge/proseforge.egg-info/requires.txt
 proseforge/proseforge.egg-info/top_level.txt
-tests/test_segment.py
