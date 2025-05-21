@@ -8,14 +8,20 @@ requires-python = ">=3.10"
 # Add new libs here (PEP 621 compliant list)
 dependencies = [
     "openai>=1.0.0",      # LLM inference backend
-    "anthropic>=0.25.6",  # Optional: Claude Opus support
+    "anthropic>=0.50.0",  # Optional: Claude Opus support
     "datasets>=2.19.0",   # corpus IO (optional but handy)
     "sacrebleu>=2.4.0",   # quality metrics
     "pydantic>=2.6.0",    # typed configs
     "python-dotenv>=1.0.1",
     "tqdm>=4.66.0",
-    "lightnovel-crawler>=3.7.5" # to grab raws
+    "lightnovel-crawler>=3.7.5", # to grab raws
+    "ftfy~=6.1",
+    "ruamel.yaml>=0.17",
+    "tiktoken>=0.9.0"
 ]
 
 [tool.black]
 line-length = 100
+
+[tool.setuptools.packages.find]
+where = ["proseforge"]
