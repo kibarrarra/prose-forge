@@ -14,3 +14,4 @@ Requires-Dist: lightnovel-crawler>=3.7.5
 Requires-Dist: ftfy~=6.1
 Requires-Dist: ruamel.yaml>=0.17
 Requires-Dist: tiktoken>=0.9.0
+Requires-Dist: rich>=13.7.0
