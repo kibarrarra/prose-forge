@@ -48,8 +48,8 @@ def normalize_text(text: str) -> str:
     
     # Fix common character substitutions
     replacements = {
-        'â€"': '—',  # em dash
-        'â€"': '–',  # en dash
+        'â€”': '—',  # em dash
+        'â€“': '–',  # en dash
         'â€˜': ''',  # left single quote
         'â€™': ''',  # right single quote
         'â€œ': '"',  # left double quote
