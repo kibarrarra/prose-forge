@@ -515,10 +515,10 @@ def run_editor_panel(
     
     log.info(f"Running editor panel: {' '.join(str(arg) for arg in cmd)}")
     
-    # Set up environment with custom critic prompt if provided
+    # Set up environment with custom editor prompt if provided
     env = os.environ.copy()
     if editor_spec_content:
-        env["CRITIC_PROMPT_OVERRIDE"] = editor_spec_content
+        env["EDITOR_PROMPT_TEMPLATE"] = editor_spec_content
     
     # Set model override if provided
     if model:
