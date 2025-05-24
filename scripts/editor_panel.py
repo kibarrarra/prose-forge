@@ -121,7 +121,8 @@ def main():
     if truncated:
         log.warning("Context tokens (%d) exceed model limit %d; analysis was truncated", token_count, model_context_limit)
 
-    rubric = textwrap.dedent("""
+    rubric_env = os.environ.get("EDITOR_PROMPT_TEMPLATE")
+    rubric = textwrap.dedent(rubric_env) if rubric_env else textwrap.dedent("""
         You are an EDITOR reviewing a REWRITE section against its RAW SOURCE.
 
         Your **primary goal** is to identify areas for improvement and formulate a
