@@ -10,7 +10,7 @@ Usage:
 
 import argparse, json, pathlib, textwrap, os, sys
 from utils.io_helpers import read_utf8
-from utils.paths import ROOT
+from utils.paths import ROOT, CTX_DIR
 from utils.logging_helper import get_logger
 from utils.llm_client import get_llm_client
 
@@ -87,6 +87,15 @@ def load_texts_from_dir(directory: pathlib.Path) -> list[tuple[str, str, str]]:
         raise ValueError(f"No text files found in {directory}")
     
     return results
+
+
+def load_original_text(chapter_id: str) -> str:
+    """Return raw source text for *chapter_id* if available."""
+    path = CTX_DIR / f"{chapter_id}.txt"
+    if not path.exists():
+        log.warning(f"Context not found for {chapter_id} at {path}")
+        return ""
+    return read_utf8(path)
 
 def chat(system: str, user: str) -> str:
     res = client.chat.completions.create(
@@ -504,6 +513,7 @@ def gather_final_versions(
 def rank_chapter_versions(
     chapter_id: str,
     versions: List[Tuple[str, str, str]],
+    original_text: str | None = None,
 ) -> Dict[str, Any]:
     """
     Rank multiple versions of a chapter and provide detailed feedback.
@@ -511,6 +521,7 @@ def rank_chapter_versions(
     Args:
         chapter_id: The ID of the chapter being evaluated
         versions: List of (persona_name, chapter_text, voice_spec) tuples
+        original_text: Optional raw source text for fidelity judging
         
     Returns:
         Dictionary containing ranking results and analysis
@@ -541,7 +552,10 @@ Then have a brief discussion comparing the merits of each draft.
 End your response with a JSON block containing your consensus rankings.
 """
     
+    source_block = f"\n\nRAW SOURCE:\n{original_text}" if original_text else ""
+
     ranking_rubric = f"""Compare {len(versions)} anonymous prose drafts of chapter {chapter_id}.
+The original chapter text is provided for judging faithfulness.{source_block}
 For each draft, provide:
 
 1. Clarity & readability — score 1-10
@@ -891,6 +905,71 @@ Below are the drafts, separated by markers:
             "versions": [v[0] for v in versions],
             "error": f"LLM ranking failed: {e}"
         }
+
+
+class Elo:
+    """Minimal Elo rating helper."""
+
+    def __init__(self, k: float = 20.0, base: float = 1000.0) -> None:
+        self.k = k
+        self.base = base
+        self._ratings: Dict[str, float] = {}
+
+    def rating(self, name: str) -> float:
+        return self._ratings.get(name, self.base)
+
+    def _expect(self, ra: float, rb: float) -> float:
+        return 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
+
+    def update(self, winner: str, loser: str) -> None:
+        ra, rb = self.rating(winner), self.rating(loser)
+        ea = self._expect(ra, rb)
+        eb = 1.0 - ea
+        self._ratings[winner] = ra + self.k * (1.0 - ea)
+        self._ratings[loser] = rb + self.k * (0.0 - eb)
+
+    def leaderboard(self) -> List[Tuple[str, float]]:
+        return sorted(self._ratings.items(), key=lambda x: x[1], reverse=True)
+
+
+def pairwise_rank_chapter_versions(
+    chapter_id: str,
+    versions: List[Tuple[str, str, str]],
+    repeats: int = 1,
+) -> Dict[str, Any]:
+    """Run pairwise Elo bouts and return final ranking with discussion."""
+    original = load_original_text(chapter_id)
+    elo = Elo()
+    n = len(versions)
+    for i in range(n):
+        for j in range(i + 1, n):
+            left, right = versions[i], versions[j]
+            for r in range(repeats):
+                first, second = (right, left) if r % 2 else (left, right)
+                res = rank_chapter_versions(
+                    chapter_id,
+                    [first, second],
+                    original_text=original,
+                )
+                table = res.get("table", [])
+                if table:
+                    table.sort(key=lambda x: x.get("rank", 0))
+                    winner = table[0].get("id", "").replace("DRAFT_", "")
+                else:
+                    winner = first[0]
+                if winner == first[0]:
+                    elo.update(first[0], second[0])
+                else:
+                    elo.update(second[0], first[0])
+
+    ordered = sorted(versions, key=lambda x: elo.rating(x[0]), reverse=True)
+    final = rank_chapter_versions(
+        chapter_id,
+        ordered,
+        original_text=original,
+    )
+    final["elo_ratings"] = elo.leaderboard()
+    return final
 
 def enhance_critic_text(text, chapter_id=None):
     """Helper function to format critic text for HTML display."""
@@ -1911,7 +1990,7 @@ def rank_all_chapters(output_path: pathlib.Path, addl_dirs: Optional[pathlib.Pat
                 
             log.info(f"Ranking {len(versions)} versions of chapter {chapter_id}")
             try:
-                ranking = rank_chapter_versions(chapter_id, versions)
+                ranking = pairwise_rank_chapter_versions(chapter_id, versions)
                 rankings.append(ranking)
             except Exception as e:
                 log.error(f"Failed to rank chapter {chapter_id}: {e}")
