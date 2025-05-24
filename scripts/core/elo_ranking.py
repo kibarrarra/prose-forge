@@ -125,15 +125,29 @@ Below are the drafts, separated by markers:
 
     # Call the model for rankings with discussion
     try:
+        # Calculate appropriate max_tokens based on content size to prevent truncation
+        input_length = len(system_prompt) + len(ranking_rubric)
+        # Estimate ~4 chars per token, then add generous buffer for output
+        estimated_input_tokens = input_length // 4
+        # Allow for substantial output based on number of versions
+        output_buffer = max(2000, len(versions) * 800)  # More tokens for more versions
+        max_tokens = min(4096, output_buffer)  # Cap at reasonable limit
+        
         # First, get a discussion between critics
         discussion_res = client.chat.completions.create(
             model=MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": ranking_rubric}
-            ]
+            ],
+            max_tokens=max_tokens,
+            temperature=0.1  # Lower temperature for more consistent results
         )
         discussion_text = discussion_res.choices[0].message.content.strip()
+        
+        # Log the actual response for debugging
+        with open(log_dir / f"critic_response_{chapter_id}_{timestamp}.txt", "w", encoding="utf-8") as f:
+            f.write(discussion_text)
         
         # Check for truncated response
         if not discussion_text:
@@ -144,88 +158,128 @@ Below are the drafts, separated by markers:
                 "error": "Empty LLM response"
             }
         
-        # Check for common signs of truncation
+        # More comprehensive truncation detection
         truncation_indicators = [
             "- Fidelity to original plot",  # Specific case we saw
             "- Tone & atmosphere: ",
             "- Clarity & readability: ",
             "**Comments**:",
-            "**DRAFT_"
+            "**DRAFT_",
+            "- Fidelity to original",
+            "Plot fidelity:",
+            "Tone fidelity:",
+            ": ["  # Incomplete list starts
         ]
         
-        is_truncated = any(discussion_text.rstrip().endswith(indicator.rstrip()) for indicator in truncation_indicators)
+        # Check if response was truncated by the LLM due to max_tokens
+        finish_reason = getattr(discussion_res.choices[0], 'finish_reason', None)
+        api_truncated = finish_reason in ['length', 'max_tokens']
+        
+        # Check for content-based truncation signs
+        content_truncated = any(discussion_text.rstrip().endswith(indicator.rstrip()) for indicator in truncation_indicators)
+        
+        is_truncated = api_truncated or content_truncated
         
         if is_truncated:
-            log.warning(f"Detected truncated response for chapter {chapter_id} - retrying with shorter prompt")
+            if api_truncated:
+                log.warning(f"API truncated response (finish_reason: {finish_reason}) for chapter {chapter_id} - retrying with simpler prompt")
+            else:
+                log.warning(f"Detected content truncation in response for chapter {chapter_id} - retrying with simpler prompt")
             
-            # Try again with a more concise prompt
-            concise_rubric = f"""Rank {len(versions)} prose drafts of chapter {chapter_id} from best to worst.
+            # Try again with a much more concise prompt to avoid truncation
+            concise_rubric = f"""Rank these {len(versions)} prose drafts from best (rank 1) to worst:
 
-{get_scoring_rubric("ranking")}
-
-Drafts:
 {drafts_text}
 
-Respond with brief analysis followed by JSON rankings."""
+Rate each draft 1-10 on: clarity, tone, plot_fidelity, tone_fidelity, overall.
+
+End with JSON:
+```json
+{{"table": [{{"rank": 1, "id": "DRAFT_name", "clarity": 9, "tone": 8, "plot_fidelity": 9, "tone_fidelity": 8, "overall": 9}}], "analysis": "Brief winner analysis", "feedback": {{"DRAFT_name": "Brief feedback"}}}}
+```"""
             
             discussion_res = client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a literary critic. Provide brief analysis and JSON rankings."},
+                    {"role": "system", "content": "You are a literary critic. Provide rankings with brief analysis."},
                     {"role": "user", "content": concise_rubric}
-                ]
+                ],
+                max_tokens=max_tokens,
+                temperature=0.1
             )
             discussion_text = discussion_res.choices[0].message.content.strip()
             
-            # If still truncated, we have a deeper issue
-            if any(discussion_text.rstrip().endswith(indicator.rstrip()) for indicator in truncation_indicators):
-                log.error(f"Response still truncated after retry for chapter {chapter_id}")
+            # Log the retry response
+            with open(log_dir / f"critic_response_retry_{chapter_id}_{timestamp}.txt", "w", encoding="utf-8") as f:
+                f.write(discussion_text)
+            
+            # Check retry for truncation
+            retry_finish_reason = getattr(discussion_res.choices[0], 'finish_reason', None)
+            retry_truncated = retry_finish_reason in ['length', 'max_tokens'] or any(discussion_text.rstrip().endswith(indicator.rstrip()) for indicator in truncation_indicators)
+            
+            if retry_truncated:
+                log.error(f"Response still truncated after retry (finish_reason: {retry_finish_reason}) for chapter {chapter_id}")
                 return {
                     "chapter_id": chapter_id,
                     "versions": [v[0] for v in versions],
-                    "error": "LLM response consistently truncated"
+                    "error": f"LLM response consistently truncated (finish_reason: {retry_finish_reason})"
                 }
         
         # Try to extract the JSON part from the discussion
         json_data = {}
         json_match = re.search(r'```json\s*(\{.*?\})\s*```', discussion_text, re.DOTALL)
-        
         if json_match:
             try:
                 json_text = json_match.group(1)
+                log.info(f"Successfully extracted JSON data from discussion for {chapter_id}")
                 json_data = json.loads(json_text)
-                log.info(f"Successfully extracted JSON data from discussion")
-            except Exception as json_err:
-                log.error(f"Error parsing JSON from discussion: {json_err}")
-        else:
-            log.debug(f"Could not find JSON data in discussion output - using fallback")
-            
-            # Try to extract just the JSON object if it exists without the markers
-            json_obj_match = re.search(r'\{\s*"table"\s*:\s*\[.*?\]\s*,\s*"analysis"\s*:.*?\}', discussion_text, re.DOTALL)
-            if json_obj_match:
-                try:
-                    json_text = json_obj_match.group(0)
-                    json_data = json.loads(json_text)
-                    log.info(f"Found JSON object without markers")
-                except Exception as json_err2:
-                    log.error(f"Error parsing loose JSON from discussion: {json_err2}")
+            except json.JSONDecodeError as e:
+                log.warning(f"Failed to parse extracted JSON: {e}")
+                json_data = {}
         
         # If we failed to extract JSON, get it separately with a structured format
         if not json_data:
-            log.warning(f"Requesting structured JSON separately")
+            log.warning(f"Requesting structured JSON separately for {chapter_id}")
             try:
+                # Create a very explicit JSON request
+                json_request = f"""Based on these drafts, output ONLY valid JSON with this exact structure:
+
+{drafts_text}
+
+JSON format (copy exactly, replace values):
+{{
+  "table": [
+    {{"rank": 1, "id": "DRAFT_[persona_name]", "clarity": [1-10], "tone": [1-10], "plot_fidelity": [1-10], "tone_fidelity": [1-10], "overall": [1-10]}},
+    {{"rank": 2, "id": "DRAFT_[persona_name]", "clarity": [1-10], "tone": [1-10], "plot_fidelity": [1-10], "tone_fidelity": [1-10], "overall": [1-10]}}
+  ],
+  "analysis": "[Brief analysis of why top draft wins]",
+  "feedback": {{
+    "DRAFT_[persona_name]": "[Brief feedback for non-winners]"
+  }}
+}}
+
+Output ONLY the JSON object."""
+                
                 json_res = client.chat.completions.create(
                     model=MODEL,
                     messages=[
-                        {"role": "system", "content": "Generate only JSON with no other text."},
-                        {"role": "user", "content": f"Based on the drafts below, output ONLY a JSON object with this structure:\n{{\"table\": [{{'rank': 1, 'id': '[DRAFT ID]', 'clarity': 9, 'tone': 8, 'plot_fidelity': 9, 'tone_fidelity': 8, 'overall': 9}}], 'analysis': 'Why top draft is best', 'feedback': {{'[DRAFT ID]': 'Feedback'}}}}\n\nDrafts:\n{drafts_text}"}
+                        {"role": "system", "content": "You are a JSON generator. Output only valid JSON with no other text."},
+                        {"role": "user", "content": json_request}
                     ],
-                    response_format={"type": "json_object"}
+                    response_format={"type": "json_object"},
+                    max_tokens=max_tokens,
+                    temperature=0.0  # Deterministic for JSON
                 )
                 json_text = json_res.choices[0].message.content.strip()
                 json_data = json.loads(json_text)
+                log.info(f"Successfully generated fallback JSON for {chapter_id}")
+                
+                # Log the fallback JSON response
+                with open(log_dir / f"critic_json_fallback_{chapter_id}_{timestamp}.txt", "w", encoding="utf-8") as f:
+                    f.write(json_text)
+                    
             except Exception as json_fallback_err:
-                log.error(f"Fallback JSON generation failed: {json_fallback_err}")
+                log.error(f"Fallback JSON generation failed for {chapter_id}: {json_fallback_err}")
                 return {
                     "chapter_id": chapter_id,
                     "versions": [v[0] for v in versions],
@@ -246,11 +300,13 @@ Respond with brief analysis followed by JSON rankings."""
                 "error": "Empty ranking table in LLM response"
             }
         
-        # Validate that we have rankings for all versions
+        # Validate that we have rankings for all versions and log detailed info
         expected_versions = len(versions)
         ranked_versions = len(table)
         if ranked_versions < expected_versions:
             log.warning(f"Only {ranked_versions}/{expected_versions} versions ranked for chapter {chapter_id}")
+            log.warning(f"Expected personas: {[v[0] for v in versions]}")
+            log.warning(f"Ranked personas: {[entry.get('persona', entry.get('id', 'unknown')) for entry in table]}")
             # Continue anyway, but note the discrepancy
         
         # Process the table to replace DRAFT_ IDs with actual persona names
@@ -409,19 +465,85 @@ def smart_rank_chapter_versions(
             else:
                 avg_ranks[persona] = n_versions  # Worst possible rank
         
-        # Sort by average rank (lower is better) and take top candidates
-        sorted_personas = sorted(avg_ranks.items(), key=lambda x: x[1])
-        top_persona_names = [persona for persona, _ in sorted_personas[:top_candidates]]
-        
         # Temporarily stop progress to show detailed average ranking results
         progress.stop()
         progress.console.print(f"[bold yellow]Average rankings across {initial_runs} runs:[/]")
-        for i, (persona, avg_rank) in enumerate(sorted_personas, 1):
-            if i <= top_candidates:
-                progress.console.print(f"  [green]{i}.[/] {persona}: {avg_rank:.1f} → [bold green]ADVANCING[/]")
-            else:
-                progress.console.print(f"  [dim]{i}.[/] {persona}: {avg_rank:.1f}")
         
+        # Calculate and show detailed statistics for ties analysis
+        detailed_stats = {}
+        for persona, ranks in rank_accumulator.items():
+            if ranks:
+                avg_rank = statistics.mean(ranks)
+                std_dev = statistics.stdev(ranks) if len(ranks) > 1 else 0
+                detailed_stats[persona] = {
+                    'avg_rank': avg_rank,
+                    'std_dev': std_dev,
+                    'ranks': ranks,
+                    'consistency': 'High' if std_dev < 0.5 else 'Medium' if std_dev < 1.5 else 'Low'
+                }
+            else:
+                detailed_stats[persona] = {
+                    'avg_rank': n_versions,
+                    'std_dev': 0,
+                    'ranks': [],
+                    'consistency': 'N/A'
+                }
+        
+        # Sort by average rank for display
+        sorted_personas = sorted(detailed_stats.items(), key=lambda x: x[1]['avg_rank'])
+        
+        # Check for ties (versions with identical average ranks)
+        tie_groups = []
+        current_tie_group = []
+        current_rank = None
+        
+        for persona, stats in sorted_personas:
+            rank = stats['avg_rank']
+            if current_rank is None or abs(rank - current_rank) < 0.01:  # Allow tiny floating point differences
+                current_tie_group.append((persona, stats))
+                current_rank = rank
+            else:
+                if len(current_tie_group) > 1:
+                    tie_groups.append(current_tie_group)
+                current_tie_group = [(persona, stats)]
+                current_rank = rank
+        
+        # Don't forget the last group
+        if len(current_tie_group) > 1:
+            tie_groups.append(current_tie_group)
+        
+        # Display results with tie information
+        for i, (persona, stats) in enumerate(sorted_personas, 1):
+            avg_rank = stats['avg_rank']
+            std_dev = stats['std_dev']
+            ranks = stats['ranks']
+            consistency = stats['consistency']
+            
+            # Check if this persona is in a tie
+            in_tie = any(persona in [p for p, _ in group] for group in tie_groups)
+            tie_indicator = " [TIE]" if in_tie else ""
+            
+            if i <= top_candidates:
+                progress.console.print(f"  [green]{i}.[/] {persona}: {avg_rank:.1f} (σ={std_dev:.2f}, {consistency} consistency){tie_indicator} → [bold green]ADVANCING[/]")
+                if len(ranks) > 1:
+                    progress.console.print(f"      [dim]Individual ranks: {ranks}[/]")
+            else:
+                progress.console.print(f"  [dim]{i}.[/] {persona}: {avg_rank:.1f} (σ={std_dev:.2f}, {consistency} consistency){tie_indicator}")
+        
+        # Report on ties if any found
+        if tie_groups:
+            progress.console.print(f"[bold yellow]⚠️  Detected {len(tie_groups)} tie group(s):[/]")
+            for i, group in enumerate(tie_groups, 1):
+                personas = [p for p, _ in group]
+                avg_rank = group[0][1]['avg_rank']
+                progress.console.print(f"    [yellow]Tie {i}:[/] {', '.join(personas)} (all at rank {avg_rank:.1f})")
+                
+                # Show individual run details for tied groups
+                progress.console.print(f"      [dim]Individual run analysis:[/]")
+                for persona, stats in group:
+                    progress.console.print(f"        [dim]{persona}: ranks {stats['ranks']} (std dev: {stats['std_dev']:.2f})[/]")
+        
+        top_persona_names = [persona for persona, _ in sorted_personas[:top_candidates]]
         progress.console.print(f"[bold yellow]Top candidates:[/] {', '.join(top_persona_names)}")
         progress.start()  # Resume progress
         
@@ -558,19 +680,85 @@ def smart_rank_chapter_versions(
                 else:
                     avg_ranks[persona] = n_versions  # Worst possible rank
             
-            # Sort by average rank (lower is better) and take top candidates
-            sorted_personas = sorted(avg_ranks.items(), key=lambda x: x[1])
-            top_persona_names = [persona for persona, _ in sorted_personas[:top_candidates]]
-            
             # Temporarily stop progress to show detailed average ranking results
             standalone_progress.stop()
             standalone_progress.console.print(f"[bold yellow]Average rankings across {initial_runs} runs:[/]")
-            for i, (persona, avg_rank) in enumerate(sorted_personas, 1):
-                if i <= top_candidates:
-                    standalone_progress.console.print(f"  [green]{i}.[/] {persona}: {avg_rank:.1f} → [bold green]ADVANCING[/]")
-                else:
-                    standalone_progress.console.print(f"  [dim]{i}.[/] {persona}: {avg_rank:.1f}")
             
+            # Calculate and show detailed statistics for ties analysis
+            detailed_stats = {}
+            for persona, ranks in rank_accumulator.items():
+                if ranks:
+                    avg_rank = statistics.mean(ranks)
+                    std_dev = statistics.stdev(ranks) if len(ranks) > 1 else 0
+                    detailed_stats[persona] = {
+                        'avg_rank': avg_rank,
+                        'std_dev': std_dev,
+                        'ranks': ranks,
+                        'consistency': 'High' if std_dev < 0.5 else 'Medium' if std_dev < 1.5 else 'Low'
+                    }
+                else:
+                    detailed_stats[persona] = {
+                        'avg_rank': n_versions,
+                        'std_dev': 0,
+                        'ranks': [],
+                        'consistency': 'N/A'
+                    }
+            
+            # Sort by average rank for display
+            sorted_personas = sorted(detailed_stats.items(), key=lambda x: x[1]['avg_rank'])
+            
+            # Check for ties (versions with identical average ranks)
+            tie_groups = []
+            current_tie_group = []
+            current_rank = None
+            
+            for persona, stats in sorted_personas:
+                rank = stats['avg_rank']
+                if current_rank is None or abs(rank - current_rank) < 0.01:  # Allow tiny floating point differences
+                    current_tie_group.append((persona, stats))
+                    current_rank = rank
+                else:
+                    if len(current_tie_group) > 1:
+                        tie_groups.append(current_tie_group)
+                    current_tie_group = [(persona, stats)]
+                    current_rank = rank
+            
+            # Don't forget the last group
+            if len(current_tie_group) > 1:
+                tie_groups.append(current_tie_group)
+            
+            # Display results with tie information
+            for i, (persona, stats) in enumerate(sorted_personas, 1):
+                avg_rank = stats['avg_rank']
+                std_dev = stats['std_dev']
+                ranks = stats['ranks']
+                consistency = stats['consistency']
+                
+                # Check if this persona is in a tie
+                in_tie = any(persona in [p for p, _ in group] for group in tie_groups)
+                tie_indicator = " [TIE]" if in_tie else ""
+                
+                if i <= top_candidates:
+                    standalone_progress.console.print(f"  [green]{i}.[/] {persona}: {avg_rank:.1f} (σ={std_dev:.2f}, {consistency} consistency){tie_indicator} → [bold green]ADVANCING[/]")
+                    if len(ranks) > 1:
+                        standalone_progress.console.print(f"      [dim]Individual ranks: {ranks}[/]")
+                else:
+                    standalone_progress.console.print(f"  [dim]{i}.[/] {persona}: {avg_rank:.1f} (σ={std_dev:.2f}, {consistency} consistency){tie_indicator}")
+            
+            # Report on ties if any found
+            if tie_groups:
+                standalone_progress.console.print(f"[bold yellow]⚠️  Detected {len(tie_groups)} tie group(s):[/]")
+                for i, group in enumerate(tie_groups, 1):
+                    personas = [p for p, _ in group]
+                    avg_rank = group[0][1]['avg_rank']
+                    standalone_progress.console.print(f"    [yellow]Tie {i}:[/] {', '.join(personas)} (all at rank {avg_rank:.1f})")
+                    
+                    # Show individual run details for tied groups
+                    standalone_progress.console.print(f"      [dim]Individual run analysis:[/]")
+                    for persona, stats in group:
+                        standalone_progress.console.print(f"        [dim]{persona}: ranks {stats['ranks']} (std dev: {stats['std_dev']:.2f})[/]")
+            
+            top_persona_names = [persona for persona, _ in sorted_personas[:top_candidates]]
             standalone_progress.console.print(f"[bold yellow]Top candidates:[/] {', '.join(top_persona_names)}")
             standalone_progress.start()  # Resume progress
             
