@@ -9,6 +9,7 @@ requires-python = ">=3.10"
 dependencies = [
     "openai>=1.0.0",      # LLM inference backend
     "anthropic>=0.50.0",  # Optional: Claude Opus support
+    "httpx>=0.24.0",      # Modern async HTTP client
     "datasets>=2.19.0",   # corpus IO (optional but handy)
     "sacrebleu>=2.4.0",   # quality metrics
     "pydantic>=2.6.0",    # typed configs
