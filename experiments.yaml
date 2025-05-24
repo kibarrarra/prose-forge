@@ -17,20 +17,10 @@ experiments:
       - lotm_0001
     rounds: 1
 
-  - name: cosmic_clarity_4o
+  - name: universal_claude_baseline
     writer_spec: config/writer_specs/baseline.prompt
     editor_spec: config/editor_specs/baseline.md
-    voice_spec: config/voice_specs/cosmic_clarity.md
-    model: gpt-4o
-    chapters:
-      - lotm_0001
-    rounds: 1
-
-
-  - name: stars_and_shadow_baseline
-    writer_spec: config/writer_specs/baseline.prompt
-    editor_spec: config/editor_specs/baseline.md
-    voice_spec: config/voice_specs/stars_and_shadow.md
+    voice_spec: config/voice_specs/universal_claude.md
     model: claude-3-opus-20240229
     chapters:
       - lotm_0001
@@ -41,15 +31,6 @@ experiments:
     editor_spec: config/editor_specs/baseline.md
     voice_spec: config/voice_specs/lotm_o3_1.md
     model: claude-3-opus-20240229
-    chapters:
-      - lotm_0001
-    rounds: 1
-
-  - name: lovecraft_baseline
-    writer_spec: config/writer_specs/baseline.prompt
-    editor_spec: config/editor_specs/baseline.md
-    voice_spec: config/voice_specs/lovecraft.md
-    model: gpt-4o
     chapters:
       - lotm_0001
     rounds: 1

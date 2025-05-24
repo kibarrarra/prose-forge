@@ -1,0 +1,12 @@
+[
+  {
+    "chapter_id": "lotm_0001",
+    "versions": [
+      "cosmic_clarity_baseline",
+      "cosmic_clarity_simplified",
+      "lotm_o3_1_baseline"
+    ],
+    "error": "Ranking validation failed",
+    "timestamp": "2025-05-24T13:50:47.401856"
+  }
+]

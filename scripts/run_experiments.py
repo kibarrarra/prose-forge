@@ -614,134 +614,6 @@ def create_final_version(
         
         subprocess.run(cmd, check=True, cwd=ROOT, env=env)
 
-def compare_experiments(exp1: str, exp2: str, output_dir: pathlib.Path, 
-                 dir1: Optional[str] = None, dir2: Optional[str] = None,
-                 addl_drafts_dir: Optional[str] = None) -> None:
-    """Compare the results of two experiments or specific directories."""
-    # Create a progress status directly with a message (no context manager)
-    console.print(f"[bold blue]Setting up comparison between experiments...[/]")
-    
-    # If specific directories are provided, use those
-    if dir1 and dir2:
-        exp1_dir = pathlib.Path(dir1)
-        exp2_dir = pathlib.Path(dir2)
-        
-        # Extract meaningful names from paths for better file naming
-        # Instead of just using the last directory name, use parent/round format
-        dir1_parts = exp1_dir.parts
-        dir2_parts = exp2_dir.parts
-        
-        # Look for 'auditions' in the path to extract experiment name and round
-        if 'auditions' in dir1_parts:
-            # Find index of 'auditions' in the path
-            idx = dir1_parts.index('auditions')
-            if idx + 1 < len(dir1_parts):  # Make sure there's an experiment name after 'auditions'
-                exp1_name = f"{dir1_parts[idx+1]}_{exp1_dir.name}"
-            else:
-                exp1_name = exp1_dir.name
-        else:
-            exp1_name = exp1_dir.name
-            
-        if 'auditions' in dir2_parts:
-            idx = dir2_parts.index('auditions')
-            if idx + 1 < len(dir2_parts):  # Make sure there's an experiment name after 'auditions'
-                exp2_name = f"{dir2_parts[idx+1]}_{exp2_dir.name}"
-            else:
-                exp2_name = exp2_dir.name
-        else:
-            exp2_name = exp2_dir.name
-    else:
-        # Otherwise use the default "final" directories under the experiment names
-        exp1_dir = ROOT / "drafts" / "auditions" / exp1 / "final"
-        exp2_dir = ROOT / "drafts" / "auditions" / exp2 / "final" 
-        exp1_name = f"{exp1}_final"
-        exp2_name = f"{exp2}_final"
-    
-    if not exp1_dir.exists() or not exp2_dir.exists():
-        console.print(f"[bold red]Error:[/] One or both directories do not exist: {exp1_dir}, {exp2_dir}")
-        return
-    
-    # Update status with a progress message (no context manager)
-    console.print(f"[bold blue]Comparing [cyan]{exp1_name}[/] vs [cyan]{exp2_name}...[/]")
-    
-    # Use existing compare_versions.py script
-    compare_script = ROOT / "scripts" / "compare_versions.py"
-    if compare_script.exists():
-        # Create comparison output directory
-        comparison_dir = output_dir / "comparisons"
-        comparison_dir.mkdir(exist_ok=True)
-        
-        output_file = comparison_dir / f"{exp1_name}_vs_{exp2_name}.html"
-        cmd = [
-            sys.executable, str(compare_script),
-            "--dir1", str(exp1_dir),
-            "--dir2", str(exp2_dir),
-            "--output", str(output_file),
-            "--format", "html"  # Explicitly request HTML format
-        ]
-        
-        # Add additional drafts folder if provided
-        if addl_drafts_dir and pathlib.Path(addl_drafts_dir).exists():
-            cmd.extend(["--addl-dirs", str(addl_drafts_dir)])
-            console.print(f"[blue]Including additional drafts from:[/] {addl_drafts_dir}")
-        
-        log.info(f"Running comparison: {' '.join(str(arg) for arg in cmd)}")
-        
-        # Show spinner during comparison
-        with console.status("[bold yellow]Running comparison...[/]", spinner="dots") as status:
-            # Run the process but only log specific lines from stdout that we want to see
-            completed_process = subprocess.run(
-                cmd, 
-                check=False,  # Don't raise exception on non-zero exit
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace'
-            )
-        
-        # Check for errors manually
-        if completed_process.returncode != 0:
-            console.print(f"[bold red]Comparison failed with exit code {completed_process.returncode}[/]")
-            if completed_process.stderr:
-                console.print(f"[red]Error output:[/] {completed_process.stderr}")
-            return
-        
-        # Extract useful metrics from the stdout if available
-        metrics = {}
-        for line in completed_process.stdout.splitlines():
-            if ":" in line and ("similarity" in line.lower() or "difference" in line.lower() or "score" in line.lower()):
-                try:
-                    key, value = line.split(":", 1)
-                    metrics[key.strip()] = value.strip()
-                except ValueError:
-                    pass
-        
-        # Show a nice summary panel
-        summary_lines = [
-            f"[bold green]Comparison completed: {exp1_name} vs {exp2_name}[/]",
-            f"[cyan]Output:[/] {output_file}"
-        ]
-        
-        # Add metrics if we found any
-        if metrics:
-            summary_lines.append("\n[yellow]Metrics:[/]")
-            for key, value in metrics.items():
-                summary_lines.append(f"  [cyan]{key}:[/] {value}")
-        
-        # Suggest opening the file
-        summary_lines.append("\n[bold]Next steps:[/]")
-        summary_lines.append(f"  Open the HTML file in your browser to view the detailed comparison")
-        
-        console.print(Panel.fit(
-            "\n".join(summary_lines),
-            title="Comparison Summary",
-            border_style="green",
-            padding=(1, 2)
-        ))
-    else:
-        console.print(f"[bold red]Error:[/] Comparison script not found: {compare_script}")
-
 def generate_html_report(results: List[Dict[str, Any]], output_dir: pathlib.Path) -> str:
     """Generate an HTML report summarizing experiment results.
     
@@ -955,18 +827,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Run experiments from a YAML configuration file")
     ap.add_argument("--config", help="Path to YAML configuration file")
     ap.add_argument("--filter", help="Filter experiments by name or components")
-    ap.add_argument("--compare", nargs=2, metavar=("EXP1", "EXP2"), 
-                    help="Compare results of two experiments (uses final directories)")
-    ap.add_argument("--compare-dirs", nargs=2, metavar=("DIR1", "DIR2"),
-                    help="Compare results between two specific directories")
-    ap.add_argument("--addl-drafts", metavar="DIR",
-                    help="Directory containing additional drafts for comparison (structure: addl_drafts/draft_type/chapter.txt)")
     ap.add_argument("--output-dir", default=EXP_SUMM_DIR,
                     help="Directory for experiment outputs")
-    ap.add_argument("--no-auto-compare", action="store_true",
-                    help="Disable automatic comparison of all experiments after they complete")
-    ap.add_argument("--generate-combined-report", nargs=2, metavar=("EXP_REPORT", "COMP_REPORT"),
-                    help="Generate combined report from existing experiment report and comparison report")
     
     args = ap.parse_args()
     
@@ -974,36 +836,9 @@ def main() -> None:
     output_dir = pathlib.Path(args.output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
     
-    # Handle generate combined report operation
-    if args.generate_combined_report:
-        exp_report, comp_report = args.generate_combined_report
-        if not os.path.exists(exp_report) or not os.path.exists(comp_report):
-            ap.error(f"Both report files must exist. Check paths: {exp_report}, {comp_report}")
-            
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        combined_report_path = output_dir / f"combined_report_{timestamp}.html"
-        
-        try:
-            merge_html_reports(exp_report, [comp_report], combined_report_path)
-            console.print(f"[bold green]Combined HTML report generated:[/] [blue]{combined_report_path}[/]")
-        except Exception as e:
-            console.print(f"[bold red]Error generating combined report:[/] {e}")
-        return
-        
-    # Handle comparison operations
-    if args.compare:
-        # Compare experiment final outputs
-        compare_experiments(args.compare[0], args.compare[1], output_dir, addl_drafts_dir=args.addl_drafts)
-        return
-        
-    if args.compare_dirs:
-        # Compare specific directories
-        compare_experiments("dir1", "dir2", output_dir, args.compare_dirs[0], args.compare_dirs[1], addl_drafts_dir=args.addl_drafts)
-        return
-    
-    # For all other operations, require config file
+    # For all operations, require config file
     if not args.config:
-        ap.error("the --config argument is required unless using --compare or --compare-dirs")
+        ap.error("the --config argument is required")
     
     # Load experiments
     config = load_experiments(args.config)
@@ -1084,7 +919,7 @@ def main() -> None:
         # Set status style based on completion
         status_style = "[green]" if result["status"] == "Completed" else "[red]"
         
-        # Track completed experiments for comparison
+        # Track completed experiments for reference
         if result["status"] == "Completed":
             completed_experiments.append(result["name"])
         
@@ -1103,271 +938,25 @@ def main() -> None:
     console.print(table)
     
     # Generate HTML report for experiment results
-    html_report_path = None
     if experiment_results:
         report_file = generate_html_report(experiment_results, output_dir)
-        html_report_path = report_file
         console.print(f"[bold green]Experiment HTML report generated:[/] [blue]{report_file}[/]")
     
-    # Automatically compare all experiments if we have multiple completed ones and auto-compare isn't disabled
-    comparison_html_paths = []
-    if len(completed_experiments) >= 2 and not args.no_auto_compare:
-        console.print(f"[bold cyan]Automatically comparing all {len(completed_experiments)} completed experiments...[/]")
-        
-        # Run all-finals comparison using compare_versions.py
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        compare_output_path = output_dir / f"all_finals_comparison_{timestamp}.html"
-        
-        try:
-            # Use the all-finals option from compare_versions.py
-            all_finals_cmd = [
-                sys.executable, str(ROOT / "scripts" / "compare_versions.py"),
-                "--all-finals",
-                "--output", str(compare_output_path)
-            ]
-            
-            # Add additional drafts folder if provided
-            if args.addl_drafts and pathlib.Path(args.addl_drafts).exists():
-                all_finals_cmd.extend(["--addl-dirs", str(args.addl_drafts)])
-                console.print(f"[blue]Including additional drafts in all-finals comparison from:[/] {args.addl_drafts}")
-            
-            with console.status("[bold yellow]Running full comparison of all experiment versions...[/]", spinner="dots") as status:
-                subprocess.run(all_finals_cmd, check=True, capture_output=True)
-            
-            console.print(f"[bold green]All-experiments comparison generated:[/] [blue]{compare_output_path}[/]")
-            comparison_html_paths.append(str(compare_output_path))
-        except subprocess.CalledProcessError as e:
-            console.print(f"[bold red]Error generating all-experiments comparison:[/] {e}")
-        
-        # Create a combined HTML report
-        if html_report_path and comparison_html_paths:
-            combined_report_path = output_dir / f"combined_report_{timestamp}.html"
-            try:
-                merge_html_reports(html_report_path, comparison_html_paths, combined_report_path)
-                console.print(f"[bold green]Combined HTML report generated:[/] [blue]{combined_report_path}[/]")
-            except Exception as e:
-                console.print(f"[bold red]Error generating combined report:[/] {e}")
-
-def merge_html_reports(experiment_report: str, comparison_reports: List[str], output_path: str) -> None:
-    """
-    Merge experiment results HTML with comparison HTML reports.
-    
-    Args:
-        experiment_report: Path to the experiment results HTML report
-        comparison_reports: List of paths to comparison HTML reports (typically just the all-finals comparison)
-        output_path: Output path for the combined report
-    """
-    # Read the experiment report HTML
-    with open(experiment_report, 'r', encoding='utf-8') as f:
-        exp_html = f.read()
-    
-    # Extract the body content (remove html, head, and body tags)
-    exp_body = exp_html.split('<body>')[1].split('</body>')[0].strip()
-    
-    # Extract any CSS from the experiment report
-    exp_css = ""
-    if '<style>' in exp_html and '</style>' in exp_html:
-        exp_css = exp_html.split('<style>')[1].split('</style>')[0].strip()
-    
-    # Read the all-finals comparison report
-    all_finals_body = ""
-    all_finals_css = ""
-    if comparison_reports:
-        try:
-            with open(comparison_reports[0], 'r', encoding='utf-8') as f:
-                comp_html = f.read()
-            
-            # Extract the body content
-            all_finals_body = comp_html.split('<body>')[1].split('</body>')[0].strip()
-            
-            # Extract CSS
-            if '<style>' in comp_html and '</style>' in comp_html:
-                all_finals_css = comp_html.split('<style>')[1].split('</style>')[0].strip()
-        except Exception as e:
-            log.error(f"Error reading comparison report {comparison_reports[0]}: {e}")
-    
-    # Combine all HTML reports with improved styling
-    combined_html = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ProseForge Combined Report</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body { 
-            padding: 20px;
-            max-width: 1200px;
-            margin: 0 auto;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        }
-        .section-divider {
-            margin: 50px 0;
-            border-top: 2px solid #eee;
-            position: relative;
-        }
-        .section-divider::before {
-            content: attr(data-title);
-            position: absolute;
-            top: -15px;
-            left: 50%;
-            transform: translateX(-50%);
-            background-color: white;
-            padding: 0 20px;
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #555;
-        }
-        .timestamp {
-            color: #666;
-            font-size: 0.8em;
-            margin-bottom: 20px;
-        }
-        h1 { margin-bottom: 30px; }
-        #toc {
-            background-color: #f8f9fa;
-            padding: 20px;
-            border-radius: 5px;
-            margin-bottom: 30px;
-        }
-        #toc ul {
-            list-style-type: none;
-            padding-left: 10px;
-        }
-        #toc ul li {
-            margin-bottom: 10px;
-        }
-        #toc a {
-            text-decoration: none;
-        }
-        .section-container {
-            padding: 20px;
-        }
-        
-        /* Preserve table styling */
-        .table {
-            width: 100%;
-            margin-bottom: 1rem;
-            color: #212529;
-            border-collapse: collapse;
-        }
-        .table th,
-        .table td {
-            padding: 0.75rem;
-            vertical-align: top;
-            border-top: 1px solid #dee2e6;
-        }
-        .table thead th {
-            vertical-align: bottom;
-            border-bottom: 2px solid #dee2e6;
-        }
-        
-        /* Fix tab navigation */
-        .nav-tabs {
-            border-bottom: 1px solid #dee2e6;
-            margin-bottom: 1rem;
-        }
-        .nav-tabs .nav-link {
-            margin-bottom: -1px;
-            border: 1px solid transparent;
-            border-top-left-radius: 0.25rem;
-            border-top-right-radius: 0.25rem;
-        }
-        .nav-tabs .nav-link.active {
-            color: #495057;
-            background-color: #fff;
-            border-color: #dee2e6 #dee2e6 #fff;
-        }
-        
-        /* Include original CSS from both reports */
-        """ + exp_css + """
-        
-        """ + all_finals_css + """
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>ProseForge Combined Report</h1>
-        <div class="timestamp">Generated on: """ + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</div>
-        
-        <div id="toc">
-            <h3>Table of Contents</h3>
-            <ul>
-                <li><a href="#experiment-results">1. Experiment Results</a></li>
-                <li><a href="#all-versions">2. All Versions Ranking</a></li>
-            </ul>
-        </div>
-        
-        <div id="experiment-results">
-            <div class="section-divider" data-title="Experiment Results"></div>
-            <div class="section-container">
-                """ + exp_body + """
-            </div>
-        </div>
-"""
-
-    # Add the all-versions ranking if available
-    if all_finals_body:
-        combined_html += """
-        <div id="all-versions">
-            <div class="section-divider" data-title="All Versions Ranking"></div>
-            <div class="section-container">
-                """ + all_finals_body + """
-            </div>
-        </div>
-"""
-
-    # Close the HTML and add Bootstrap JS for tab functionality
-    combined_html += """
-    </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Fix tab functionality
-        document.addEventListener('DOMContentLoaded', function() {
-            // Find all tab buttons
-            const tabButtons = document.querySelectorAll('[data-bs-toggle="tab"]');
-            
-            // Add click event listeners
-            tabButtons.forEach(function(button) {
-                button.addEventListener('click', function(event) {
-                    event.preventDefault();
-                    
-                    // Get the target tab pane
-                    const target = document.querySelector(button.dataset.bsTarget);
-                    if (!target) return;
-                    
-                    // Find all siblings and deactivate them
-                    const tabPane = target.parentElement;
-                    if (!tabPane) return;
-                    
-                    const siblings = tabPane.querySelectorAll('.tab-pane');
-                    siblings.forEach(function(pane) {
-                        pane.classList.remove('show', 'active');
-                    });
-                    
-                    // Find all nav links and deactivate them
-                    const tabLinks = button.closest('.nav-tabs');
-                    if (tabLinks) {
-                        const links = tabLinks.querySelectorAll('.nav-link');
-                        links.forEach(function(link) {
-                            link.classList.remove('active');
-                        });
-                    }
-                    
-                    // Activate the clicked button and target pane
-                    button.classList.add('active');
-                    target.classList.add('show', 'active');
-                });
-            });
-        });
-    </script>
-</body>
-</html>
-"""
-
-    # Write the combined HTML to the output file
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(combined_html)
+    # Show completion message with suggestions for next steps
+    if len(completed_experiments) >= 2:
+        console.print(Panel.fit(
+            f"[bold green]All experiments completed![/]\n\n"
+            f"[yellow]Next steps:[/]\n"
+            f"• View the HTML report: {report_file}\n"
+            f"• Compare experiment results:\n"
+            f"  [cyan]python scripts/compare_versions.py --all-finals[/]\n"
+            f"• Compare specific experiments:\n"
+            f"  [cyan]python scripts/compare_versions.py --dir1 drafts/auditions/{completed_experiments[0]}/final --dir2 drafts/auditions/{completed_experiments[1]}/final[/]",
+            title="Experiments Complete",
+            border_style="green"
+        ))
+    else:
+        console.print(f"[bold green]Experiments completed![/] View the HTML report: {report_file}")
 
 if __name__ == "__main__":
     main() 

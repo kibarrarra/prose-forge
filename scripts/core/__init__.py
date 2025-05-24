@@ -1,0 +1,1 @@
+# Core comparison and ranking functionality for ProseForge 
