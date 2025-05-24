@@ -19,6 +19,7 @@ from utils.logging_helper import get_logger
 from utils.llm_client import get_llm_client
 
 # Reuse existing ranking helper
+
 from compare_versions import rank_chapter_versions, load_original_text
 
 log = get_logger()
