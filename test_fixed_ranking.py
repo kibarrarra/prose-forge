@@ -1,9 +1,16 @@
 #!/usr/bin/env python
 """
-test_fixed_ranking.py - Test script to validate intermediate results fixes
+test_fixed_ranking.py - helper script for manual validation of intermediate
+ranking results.
 
-Run this to test that the ranking validation and save logic works properly.
+This file is not meant to be executed automatically by the test suite, so we
+explicitly mark it as non-test for pytest.
 """
+
+__test__ = False  # prevents pytest from collecting this script as a test
+
+import pytest
+pytest.skip("helper script, not part of automated tests", allow_module_level=True)
 
 import sys
 from pathlib import Path
