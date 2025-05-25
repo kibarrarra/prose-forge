@@ -8,10 +8,10 @@ experiments:
       - lotm_0001
     rounds: 1
 
-  - name: cosmic_clarity_simplified
-    writer_spec: config/writer_specs/simplified.prompt
+  - name: cosmic_clarity_baseline_2
+    writer_spec: config/writer_specs/baseline_2.prompt
     editor_spec: config/editor_specs/baseline.md
-    voice_spec: config/voice_specs/cosmic_clarity_simplified.md
+    voice_spec: config/voice_specs/cosmic_clarity.md
     model: claude-3-opus-20240229
     chapters:
       - lotm_0001

@@ -119,9 +119,12 @@ Below are the drafts, separated by markers:
     with open(log_dir / f"critic_ranking_{chapter_id}_{timestamp}.txt", "w", encoding="utf-8") as f:
         f.write(f"System: {system_prompt}\n\nUser: {ranking_rubric}")
     
-    # Only show logging message if we're not using a progress-aware console, or do it quietly
+    # Log the prompts to console
     if output_console is None:
         active_console.print(f"[dim]📝 Logged ranking prompts to {log_dir}[/]")
+    else:
+        # For progress-aware consoles, use Rich's log method which handles line breaks properly
+        output_console.log(f"📝 Logged ranking prompts to {log_dir}")
 
     # Call the model for rankings with discussion
     try:
@@ -132,6 +135,12 @@ Below are the drafts, separated by markers:
         # Allow for substantial output based on number of versions
         output_buffer = max(2000, len(versions) * 800)  # More tokens for more versions
         max_tokens = min(4096, output_buffer)  # Cap at reasonable limit
+        
+        # Log the call details without disrupting progress
+        if output_console is not None:
+            output_console.log(f"Making LLM call for {chapter_id} with {len(versions)} versions, max_tokens={max_tokens}")
+        else:
+            active_console.print(f"[dim]Making LLM call with max_tokens={max_tokens}[/]")
         
         # First, get a discussion between critics
         discussion_res = client.chat.completions.create(
@@ -151,7 +160,10 @@ Below are the drafts, separated by markers:
         
         # Check for truncated response
         if not discussion_text:
-            log.error(f"Empty response from LLM for chapter {chapter_id}")
+            if output_console is not None:
+                output_console.log(f"[red]Empty response from LLM for chapter {chapter_id}[/red]")
+            else:
+                log.error(f"Empty response from LLM for chapter {chapter_id}")
             return {
                 "chapter_id": chapter_id,
                 "versions": [v[0] for v in versions],
@@ -182,9 +194,15 @@ Below are the drafts, separated by markers:
         
         if is_truncated:
             if api_truncated:
-                log.warning(f"API truncated response (finish_reason: {finish_reason}) for chapter {chapter_id} - retrying with simpler prompt")
+                if output_console is not None:
+                    output_console.log(f"[yellow]API truncated response (finish_reason: {finish_reason}) for chapter {chapter_id} - retrying with simpler prompt[/yellow]")
+                else:
+                    log.warning(f"API truncated response (finish_reason: {finish_reason}) for chapter {chapter_id} - retrying with simpler prompt")
             else:
-                log.warning(f"Detected content truncation in response for chapter {chapter_id} - retrying with simpler prompt")
+                if output_console is not None:
+                    output_console.log(f"[yellow]Detected content truncation in response for chapter {chapter_id} - retrying with simpler prompt[/yellow]")
+                else:
+                    log.warning(f"Detected content truncation in response for chapter {chapter_id} - retrying with simpler prompt")
             
             # Try again with a much more concise prompt to avoid truncation
             concise_rubric = f"""Rank these {len(versions)} prose drafts from best (rank 1) to worst:
@@ -218,7 +236,10 @@ End with JSON:
             retry_truncated = retry_finish_reason in ['length', 'max_tokens'] or any(discussion_text.rstrip().endswith(indicator.rstrip()) for indicator in truncation_indicators)
             
             if retry_truncated:
-                log.error(f"Response still truncated after retry (finish_reason: {retry_finish_reason}) for chapter {chapter_id}")
+                if output_console is not None:
+                    output_console.log(f"[red]Response still truncated after retry (finish_reason: {retry_finish_reason}) for chapter {chapter_id}[/red]")
+                else:
+                    log.error(f"Response still truncated after retry (finish_reason: {retry_finish_reason}) for chapter {chapter_id}")
                 return {
                     "chapter_id": chapter_id,
                     "versions": [v[0] for v in versions],
@@ -231,15 +252,24 @@ End with JSON:
         if json_match:
             try:
                 json_text = json_match.group(1)
-                log.info(f"Successfully extracted JSON data from discussion for {chapter_id}")
+                if output_console is not None:
+                    output_console.log(f"Successfully extracted JSON data from discussion for {chapter_id}")
+                else:
+                    active_console.print(f"[dim]✓ Extracted JSON from discussion[/]")
                 json_data = json.loads(json_text)
             except json.JSONDecodeError as e:
-                log.warning(f"Failed to parse extracted JSON: {e}")
+                if output_console is not None:
+                    output_console.log(f"[yellow]⚠ JSON parse failed: {e}[/yellow]")
+                else:
+                    active_console.print(f"[yellow]⚠ JSON parse failed: {e}[/]")
                 json_data = {}
         
         # If we failed to extract JSON, get it separately with a structured format
         if not json_data:
-            log.warning(f"Requesting structured JSON separately for {chapter_id}")
+            if output_console is not None:
+                output_console.log(f"[yellow]⚠ Requesting structured JSON separately for {chapter_id}[/yellow]")
+            else:
+                active_console.print(f"[yellow]⚠ Requesting fallback JSON[/]")
             try:
                 # Create a very explicit JSON request
                 json_request = f"""Based on these drafts, output ONLY valid JSON with this exact structure:
@@ -272,14 +302,20 @@ Output ONLY the JSON object."""
                 )
                 json_text = json_res.choices[0].message.content.strip()
                 json_data = json.loads(json_text)
-                log.info(f"Successfully generated fallback JSON for {chapter_id}")
+                if output_console is not None:
+                    output_console.log(f"Successfully generated fallback JSON for {chapter_id}")
+                else:
+                    active_console.print(f"[dim]✓ Generated fallback JSON[/]")
                 
                 # Log the fallback JSON response
                 with open(log_dir / f"critic_json_fallback_{chapter_id}_{timestamp}.txt", "w", encoding="utf-8") as f:
                     f.write(json_text)
                     
             except Exception as json_fallback_err:
-                log.error(f"Fallback JSON generation failed for {chapter_id}: {json_fallback_err}")
+                if output_console is not None:
+                    output_console.log(f"[red]✗ Fallback JSON generation failed for {chapter_id}: {json_fallback_err}[/red]")
+                else:
+                    active_console.print(f"[red]✗ Fallback JSON failed: {json_fallback_err}[/]")
                 return {
                     "chapter_id": chapter_id,
                     "versions": [v[0] for v in versions],
@@ -293,7 +329,10 @@ Output ONLY the JSON object."""
         
         # Validate that we have a complete table
         if not table or len(table) == 0:
-            log.error(f"Empty table in JSON response for chapter {chapter_id}")
+            if output_console is not None:
+                output_console.log(f"[red]✗ Empty table in JSON response for chapter {chapter_id}[/red]")
+            else:
+                active_console.print(f"[red]✗ Empty ranking table[/]")
             return {
                 "chapter_id": chapter_id,
                 "versions": [v[0] for v in versions],
@@ -304,9 +343,18 @@ Output ONLY the JSON object."""
         expected_versions = len(versions)
         ranked_versions = len(table)
         if ranked_versions < expected_versions:
-            log.warning(f"Only {ranked_versions}/{expected_versions} versions ranked for chapter {chapter_id}")
-            log.warning(f"Expected personas: {[v[0] for v in versions]}")
-            log.warning(f"Ranked personas: {[entry.get('persona', entry.get('id', 'unknown')) for entry in table]}")
+            missing_info = f"Only {ranked_versions}/{expected_versions} versions ranked"
+            expected_personas = [v[0] for v in versions]
+            ranked_personas = [entry.get('persona', entry.get('id', 'unknown')) for entry in table]
+            
+            if output_console is not None:
+                output_console.log(f"[yellow]⚠ {missing_info} for chapter {chapter_id}[/yellow]")
+                output_console.log(f"[yellow]Expected personas: {expected_personas}[/yellow]")
+                output_console.log(f"[yellow]Ranked personas: {ranked_personas}[/yellow]")
+            else:
+                active_console.print(f"[yellow]⚠ {missing_info}[/]")
+                active_console.print(f"[yellow]Expected: {', '.join(expected_personas)}[/]")
+                active_console.print(f"[yellow]Got: {', '.join(ranked_personas)}[/]")
             # Continue anyway, but note the discrepancy
         
         # Process the table to replace DRAFT_ IDs with actual persona names
@@ -353,9 +401,14 @@ Output ONLY the JSON object."""
         return final_result
         
     except Exception as e:
-        log.error(f"LLM call failed for chapter {chapter_id}: {e}")
-        import traceback
-        log.error(f"Traceback: {traceback.format_exc()}")
+        if output_console is not None:
+            output_console.log(f"[red]✗ LLM call failed for chapter {chapter_id}: {e}[/red]")
+            import traceback
+            output_console.log(f"[red]Traceback: {traceback.format_exc()}[/red]")
+        else:
+            log.error(f"LLM call failed for chapter {chapter_id}: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
         return {
             "chapter_id": chapter_id,
             "versions": [v[0] for v in versions],
@@ -367,8 +420,9 @@ def smart_rank_chapter_versions(
     versions: List[Tuple[str, str, str]],
     initial_runs: int = 3,
     top_candidates: int = 4,
-    temperature: float = 0.8,
+    temperature: float = 0.2,
     progress: Optional[Progress] = None,
+    parent_task_id: Optional[object] = None,  # Add parent task ID parameter
 ) -> Dict[str, Any]:
     """
     Smart ranking using initial filtering + focused pairwise comparisons.
@@ -380,6 +434,7 @@ def smart_rank_chapter_versions(
         top_candidates: Number of top candidates for pairwise comparisons
         temperature: Higher temperature for more varied initial rankings
         progress: Optional existing progress instance to use
+        parent_task_id: Optional parent task ID to update progress
         
     Returns:
         Dictionary containing final ranking results and analysis
@@ -404,6 +459,10 @@ def smart_rank_chapter_versions(
     # Use existing progress or create a new one
     if progress is not None:
         # Use the existing progress instance
+        # Update parent task to show we're starting
+        if parent_task_id is not None:
+            progress.update(parent_task_id, description=f"[green]Ranking {chapter_id} - Initial runs ({len(versions)} versions)")
+        
         # Step 1: Initial randomized rankings to identify top candidates
         initial_task = progress.add_task(
             f"[cyan]Initial ranking runs for {chapter_id}", 
@@ -440,23 +499,31 @@ def smart_rank_chapter_versions(
                     progress.stop()
                     progress.console.print(f"[blue]Initial run {run + 1} results:[/]")
                     sorted_table = sorted(table, key=lambda x: x.get("rank", 0))
-                    for entry in sorted_table[:3]:  # Show top 3
+                    for entry in sorted_table:  # Show all results with visual hierarchy
                         persona = entry.get("persona", "Unknown")
                         rank = entry.get("rank", "?")
                         overall = entry.get("overall", "?")
-                        progress.console.print(f"  [green]{rank}.[/] {persona} (overall: {overall})")
+                        # Emphasize top 3 with color, show others in dim
+                        if rank <= 3:
+                            progress.console.print(f"  [green]{rank}.[/] {persona} (overall: {overall})")
+                        else:
+                            progress.console.print(f"  [dim]{rank}.[/] {persona} (overall: {overall})")
                     progress.start()  # Resume progress
                 else:
-                    log.warning(f"No table returned for initial run {run + 1}")
+                    progress.console.log(f"[yellow]⚠ No table returned for initial run {run + 1}[/yellow]")
                     
             except Exception as e:
-                log.error(f"Initial run {run + 1} failed: {e}")
+                progress.console.log(f"[red]✗ Initial run {run + 1} failed: {e}[/red]")
                 continue
             
             progress.update(initial_task, advance=1)
         
         # Remove the initial task before proceeding
         progress.remove_task(initial_task)
+        
+        # Update parent task to show pairwise comparison phase
+        if parent_task_id is not None:
+            progress.update(parent_task_id, description=f"[green]Ranking {chapter_id} - Initial analysis complete")
         
         # Calculate average ranks to identify top candidates
         for persona, ranks in rank_accumulator.items():
@@ -550,10 +617,21 @@ def smart_rank_chapter_versions(
         # Filter versions to only top candidates
         top_versions = [v for v in versions if v[0] in top_persona_names]
         
+        # Update parent task to show pairwise comparison phase
+        if parent_task_id is not None:
+            progress.update(parent_task_id, description=f"[green]Ranking {chapter_id} - Pairwise comparisons ({len(top_versions)} candidates)")
+        
         # Step 2: Focused pairwise comparisons using Elo
         n_top = len(top_versions)
         total_pairs = (n_top * (n_top - 1)) // 2
         total_comparisons = total_pairs * 2  # Each pair compared in both orders
+        
+        # Show comparison plan before starting
+        progress.console.print(f"[bold cyan]Pairwise Comparison Plan:[/]")
+        progress.console.print(f"  Top candidates: {n_top}")
+        progress.console.print(f"  Unique pairs: {total_pairs}")
+        progress.console.print(f"  Total comparisons: {total_comparisons} (each pair tested in both orders)")
+        progress.console.print(f"  Estimated time: ~{total_comparisons * 15}s at 15s per comparison")
         
         pairwise_task = progress.add_task(
             f"[magenta]Pairwise comparisons for {chapter_id}", 
@@ -562,18 +640,23 @@ def smart_rank_chapter_versions(
         
         # Compare each pair of top candidates
         comparison_count = 0
+        pair_count = 0
         
         for i in range(n_top):
             for j in range(i + 1, n_top):
                 left, right = top_versions[i], top_versions[j]
+                pair_count += 1
                 
                 # Run comparison in both orders to cancel position bias
                 for swap in [False, True]:
                     first, second = (right, left) if swap else (left, right)
                     comparison_count += 1
                     
+                    # More detailed progress description
+                    order_desc = "A→B" if not swap else "B→A"
+                    
                     progress.update(pairwise_task, 
-                        description=f"[magenta]{first[0]} vs {second[0]} ({comparison_count}/{total_comparisons})"
+                        description=f"[magenta]Pair {pair_count}/{total_pairs}: {first[0]} vs {second[0]} ({order_desc}) - Comparison {comparison_count}/{total_comparisons}[/]"
                     )
                     
                     try:
@@ -597,10 +680,10 @@ def smart_rank_chapter_versions(
                             else:
                                 elo.update(second[0], first[0])
                         else:
-                            log.warning(f"No ranking returned for {first[0]} vs {second[0]}")
+                            progress.console.log(f"[yellow]⚠ No ranking returned for {first[0]} vs {second[0]}[/yellow]")
                             
                     except Exception as e:
-                        log.error(f"Pairwise comparison failed: {first[0]} vs {second[0]}: {e}")
+                        progress.console.log(f"[red]✗ Pairwise comparison failed: {first[0]} vs {second[0]}: {e}[/red]")
                         continue
                     
                     progress.update(pairwise_task, advance=1)
@@ -658,19 +741,23 @@ def smart_rank_chapter_versions(
                         standalone_progress.stop()
                         standalone_progress.console.print(f"[blue]Initial run {run + 1} results:[/]")
                         sorted_table = sorted(table, key=lambda x: x.get("rank", 0))
-                        for entry in sorted_table[:3]:  # Show top 3
+                        for entry in sorted_table:  # Show all results with visual hierarchy
                             persona = entry.get("persona", "Unknown")
                             rank = entry.get("rank", "?")
                             overall = entry.get("overall", "?")
-                            standalone_progress.console.print(f"  [green]{rank}.[/] {persona} (overall: {overall})")
+                            # Emphasize top 3 with color, show others in dim
+                            if rank <= 3:
+                                standalone_progress.console.print(f"  [green]{rank}.[/] {persona} (overall: {overall})")
+                            else:
+                                standalone_progress.console.print(f"  [dim]{rank}.[/] {persona} (overall: {overall})")
                         standalone_progress.start()  # Resume progress
                     else:
-                        log.warning(f"No table returned for initial run {run + 1}")
+                        standalone_progress.console.log(f"[yellow]⚠ No table returned for initial run {run + 1}[/yellow]")
                         
                     standalone_progress.update(initial_task, advance=1)
                 
                 except Exception as e:
-                    log.error(f"Initial run {run + 1} failed: {e}")
+                    standalone_progress.console.log(f"[red]✗ Initial run {run + 1} failed: {e}[/red]")
                     continue
             
             # Calculate average ranks to identify top candidates
@@ -777,18 +864,23 @@ def smart_rank_chapter_versions(
             
             # Compare each pair of top candidates
             comparison_count = 0
+            pair_count = 0
             
             for i in range(n_top):
                 for j in range(i + 1, n_top):
                     left, right = top_versions[i], top_versions[j]
+                    pair_count += 1
                     
                     # Run comparison in both orders to cancel position bias
                     for swap in [False, True]:
                         first, second = (right, left) if swap else (left, right)
                         comparison_count += 1
                         
+                        # More detailed progress description
+                        order_desc = "A→B" if not swap else "B→A"
+                        
                         standalone_progress.update(pairwise_task, 
-                            description=f"[magenta]{first[0]} vs {second[0]} ({comparison_count}/{total_comparisons})"
+                            description=f"[magenta]Pair {pair_count}/{total_pairs}: {first[0]} vs {second[0]} ({order_desc}) - Comparison {comparison_count}/{total_comparisons}[/]"
                         )
                         
                         try:
@@ -812,10 +904,10 @@ def smart_rank_chapter_versions(
                                 else:
                                     elo.update(second[0], first[0])
                             else:
-                                log.warning(f"No ranking returned for {first[0]} vs {second[0]}")
+                                standalone_progress.console.log(f"[yellow]⚠ No ranking returned for {first[0]} vs {second[0]}[/yellow]")
                                 
                         except Exception as e:
-                            log.error(f"Pairwise comparison failed: {first[0]} vs {second[0]}: {e}")
+                            standalone_progress.console.log(f"[red]✗ Pairwise comparison failed: {first[0]} vs {second[0]}: {e}[/red]")
                             continue
                         
                         standalone_progress.update(pairwise_task, advance=1)
@@ -875,6 +967,10 @@ def smart_rank_chapter_versions(
     # Restart progress if we were using an external progress instance (to keep parent progress working)
     if progress is not None:
         progress.start()
+        # Update parent task to show completion
+        if parent_task_id is not None:
+            winner_name = final_leaderboard[0][0] if final_leaderboard else "Unknown"
+            progress.update(parent_task_id, description=f"[green]✓ Ranked {chapter_id} - Winner: {winner_name}")
     
     # Create final ranking in the expected format
     final_table = []
@@ -885,6 +981,7 @@ def smart_rank_chapter_versions(
         # Calculate average scores from initial runs for this persona
         avg_scores = {"clarity": 0, "tone": 0, "plot_fidelity": 0, "tone_fidelity": 0, "overall": 0}
         score_counts = {"clarity": 0, "tone": 0, "plot_fidelity": 0, "tone_fidelity": 0, "overall": 0}
+        score_details = {"clarity": [], "tone": [], "plot_fidelity": [], "tone_fidelity": [], "overall": []}
         
         for result in initial_results:
             table = result.get("table", [])
@@ -892,19 +989,31 @@ def smart_rank_chapter_versions(
                 if entry.get("persona", "") == persona:
                     for score_type in avg_scores:
                         if score_type in entry:
-                            avg_scores[score_type] += entry[score_type]
+                            score = entry[score_type]
+                            avg_scores[score_type] += score
                             score_counts[score_type] += 1
+                            score_details[score_type].append(score)
                         # Handle backward compatibility with old "faithfulness" field
                         elif score_type in ["plot_fidelity", "tone_fidelity"] and "faithfulness" in entry:
-                            avg_scores[score_type] += entry["faithfulness"]
+                            score = entry["faithfulness"]
+                            avg_scores[score_type] += score
                             score_counts[score_type] += 1
+                            score_details[score_type].append(score)
         
-        # Calculate averages (or use reasonable defaults)
+        # Calculate averages and standard deviations (or use reasonable defaults)
         for score_type in avg_scores:
             if score_counts[score_type] > 0:
-                avg_scores[score_type] = round(avg_scores[score_type] / score_counts[score_type])
+                avg_scores[score_type] = round(avg_scores[score_type] / score_counts[score_type], 1)
             else:
-                avg_scores[score_type] = 7  # Default score
+                avg_scores[score_type] = 7.0  # Default score
+        
+        # Calculate standard deviations for score consistency
+        score_std_devs = {}
+        for score_type, scores in score_details.items():
+            if len(scores) > 1:
+                score_std_devs[score_type] = round(statistics.stdev(scores), 2)
+            else:
+                score_std_devs[score_type] = 0.0
         
         final_table.append({
             "rank": rank,
@@ -916,16 +1025,43 @@ def smart_rank_chapter_versions(
             "tone_fidelity": avg_scores["tone_fidelity"],
             "overall": avg_scores["overall"],
             "elo_rating": round(elo_rating, 1),
-            "avg_initial_rank": avg_ranks.get(persona, n_versions)
+            "avg_initial_rank": avg_ranks.get(persona, n_versions),
+            # Additional scoring details for analysis
+            "score_details": score_details,
+            "score_std_devs": score_std_devs,
+            "score_consistency": {
+                score_type: "High" if std_dev < 0.5 else "Medium" if std_dev < 1.0 else "Low"
+                for score_type, std_dev in score_std_devs.items()
+            }
         })
     
-    # Generate analysis focusing on the winner
+    # Generate analysis focusing on the winner with more detailed information
     winner = final_leaderboard[0]
     winner_persona = winner[0]
     winner_elo = winner[1]
     winner_avg_rank = avg_ranks.get(winner_persona, n_versions)
     
-    analysis = f"The {winner_persona} draft emerges as the clear winner with an Elo rating of {winner_elo:.1f}. This draft consistently ranked {winner_avg_rank:.1f} on average across {initial_runs} initial evaluations and then dominated in focused pairwise comparisons against the other top candidates."
+    # Get winner's score details for richer analysis
+    winner_entry = next((entry for entry in final_table if entry["persona"] == winner_persona), None)
+    winner_scores = winner_entry.get("score_details", {}) if winner_entry else {}
+    winner_consistency = winner_entry.get("score_consistency", {}) if winner_entry else {}
+    
+    analysis = f"The {winner_persona} draft emerges as the winner with an Elo rating of {winner_elo:.1f}. "
+    analysis += f"This draft averaged rank {winner_avg_rank:.1f} across {initial_runs} initial evaluations "
+    analysis += f"and then prevailed in focused pairwise comparisons against the other top candidates."
+    
+    if winner_scores:
+        analysis += f" Key strengths include consistent performance across metrics: "
+        strong_areas = []
+        for score_type, scores in winner_scores.items():
+            if scores:
+                avg_score = sum(scores) / len(scores)
+                consistency = winner_consistency.get(score_type, "Unknown")
+                if avg_score >= 8.0:
+                    strong_areas.append(f"{score_type.replace('_', ' ')} ({avg_score:.1f} avg, {consistency.lower()} consistency)")
+        
+        if strong_areas:
+            analysis += "; ".join(strong_areas) + "."
     
     # Generate feedback for non-winning drafts
     feedback = {}

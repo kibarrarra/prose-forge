@@ -271,7 +271,8 @@ def rank_all_chapters(
                         initial_runs=initial_runs,
                         top_candidates=min(top_candidates, len(versions)),  # Don't exceed available versions
                         temperature=temperature,
-                        progress=progress  # Pass the progress instance
+                        progress=progress,  # Pass the progress instance
+                        parent_task_id=chapter_task  # Pass the parent task ID
                     )
                 elif ranking_method == "full_pairwise":
                     console.print(f"[cyan]Running full pairwise comparison for {chapter_id}[/]")

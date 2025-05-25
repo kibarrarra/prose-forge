@@ -53,21 +53,41 @@ def get_scoring_rubric(context: str = "comparison") -> str:
         format_instruction = """Each critic should evaluate each draft first. Then, have a brief discussion about the drafts.
 Finally, reach a consensus on the rankings.
 
+**CRITICAL INSTRUCTIONS FOR RANKINGS:**
+- Higher scores (closer to 10) = Better performance = Lower rank number (rank 1 is best)
+- Your rankings MUST be consistent with your scores
+- The draft with the highest overall scores should receive rank 1
+- Sort the table by rank (1 = best, 2 = second best, etc.)
+
 **CRITICAL**: Your response must end with structured data in the following JSON format:
 
 ```json
 {
   "table": [
-    {"rank": 1, "id": "DRAFT_[persona name]", "clarity": 9, "tone": 8, "plot_fidelity": 9, "tone_fidelity": 8, "overall": 9},
-    {"rank": 2, "id": "DRAFT_[persona name]", "clarity": 7, "tone": 8, "plot_fidelity": 8, "tone_fidelity": 7, "overall": 8}
+    {"rank": 1, "id": "DRAFT_[persona name]", "persona": "[persona name]", "clarity": 8, "tone": 6, "plot_fidelity": 7, "tone_fidelity": 9, "overall": 7},
+    {"rank": 2, "id": "DRAFT_[persona name]", "persona": "[persona name]", "clarity": 5, "tone": 8, "plot_fidelity": 6, "tone_fidelity": 6, "overall": 6},
+    {"rank": 3, "id": "DRAFT_[persona name]", "persona": "[persona name]", "clarity": 4, "tone": 5, "plot_fidelity": 8, "tone_fidelity": 4, "overall": 5}
   ],
-  "analysis": "Why the top draft is best...",
+  "analysis": "Detailed explanation of why the top draft performs best across all criteria...",
   "feedback": {
-    "DRAFT_[persona name]": "Feedback for second place...",
-    "DRAFT_[persona name]": "Feedback for third place..."
+    "DRAFT_[persona name]": "Constructive feedback for how this draft could be improved...",
+    "DRAFT_[persona name]": "Specific suggestions for enhancing this version..."
   }
 }
-```"""
+```
+
+NOTE: These scores are format examples only - use the full 1-10 scale based on actual quality assessment. Scores should reflect genuine differences in performance across the five criteria:
+- **Clarity**: How readable and well-structured is the prose?
+- **Tone**: How effectively does it create atmosphere and mood? 
+- **Plot Fidelity**: How accurately does it preserve original story elements?
+- **Tone Fidelity**: How well does it match the original's intended emotional impact?
+- **Overall**: Holistic assessment of literary merit and effectiveness
+
+IMPORTANT: 
+1. The `id` field should be "DRAFT_[persona name]" 
+2. The `persona` field should be just the persona name without "DRAFT_" prefix
+3. Double-check that your rank order matches your scores before submitting the JSON!
+"""
     
     criteria_list = "\n".join(f"{i+1}. {criteria} — score 1-10" for i, criteria in enumerate(SCORING_CRITERIA))
     

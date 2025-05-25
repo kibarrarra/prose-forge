@@ -357,6 +357,64 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
             border-top: none;
             border-radius: 0 0 5px 5px;
         }
+        .critic-speaker-a {
+            background-color: #e7f5ff;
+            border-left: 4px solid #74c0fc;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .critic-speaker-b {
+            background-color: #f8f9fa;
+            border-left: 4px solid #adb5bd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .consensus-section {
+            background-color: #fff9db;
+            border-left: 4px solid #ffd43b;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-weight: 500;
+        }
+        .evaluation-scores {
+            background-color: #f1f3f4;
+            padding: 10px;
+            border-radius: 3px;
+            font-family: monospace;
+            margin: 5px 0;
+        }
+        .key-decision {
+            background-color: #e8f5e8;
+            border-left: 3px solid #28a745;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+        }
+        .json-reference {
+            color: #6c757d;
+            font-style: italic;
+        }
+        .raw-discussion {
+            display: none;
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .discussion-toggle {
+            cursor: pointer;
+            text-decoration: underline;
+            color: #0d6efd;
+            font-size: 0.9em;
+            margin-top: 15px;
+            display: inline-block;
+        }
     </style>
     <script>
         function toggleJson(chapterId) {
@@ -365,6 +423,15 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
                 jsonElem.style.display = 'block';
             } else {
                 jsonElem.style.display = 'none';
+            }
+        }
+        
+        function toggleRawDiscussion(chapterId) {
+            const rawElem = document.getElementById('raw-discussion-' + chapterId);
+            if (rawElem.style.display === 'none' || rawElem.style.display === '') {
+                rawElem.style.display = 'block';
+            } else {
+                rawElem.style.display = 'none';
             }
         }
     </script>
@@ -447,7 +514,8 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
         if ranking.get("method") == "smart_ranking":
             table_html += """
                                     <th>Elo Rating</th>
-                                    <th>Avg Initial Rank</th>"""
+                                    <th>Avg Initial Rank</th>
+                                    <th>Score Consistency</th>"""
         
         table_html += """
                                 </tr>
@@ -503,10 +571,31 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
                 avg_initial_rank = entry.get("avg_initial_rank", "N/A")
                 if isinstance(avg_initial_rank, float):
                     avg_initial_rank = f"{avg_initial_rank:.1f}"
+                
+                # Format score consistency information
+                score_consistency = entry.get("score_consistency", {})
+                if isinstance(score_consistency, dict) and score_consistency:
+                    # Count consistency levels
+                    high_count = sum(1 for v in score_consistency.values() if v == "High")
+                    medium_count = sum(1 for v in score_consistency.values() if v == "Medium")
+                    low_count = sum(1 for v in score_consistency.values() if v == "Low")
+                    total_metrics = len(score_consistency)
+                    
+                    if high_count == total_metrics:
+                        consistency_summary = "High"
+                    elif high_count >= total_metrics // 2:
+                        consistency_summary = f"Mostly High ({high_count}/{total_metrics})"
+                    elif medium_count >= total_metrics // 2:
+                        consistency_summary = f"Mostly Medium ({medium_count}/{total_metrics})"
+                    else:
+                        consistency_summary = f"Mixed (H:{high_count} M:{medium_count} L:{low_count})"
+                else:
+                    consistency_summary = "N/A"
                     
                 table_html += f"""
                                     <td class="score-cell">{elo_rating}</td>
-                                    <td class="score-cell">{avg_initial_rank}</td>"""
+                                    <td class="score-cell">{avg_initial_rank}</td>
+                                    <td class="score-cell">{consistency_summary}</td>"""
             
             table_html += """
                                 </tr>
@@ -564,13 +653,42 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
             initial_avg_ranks = ranking.get("initial_avg_ranks", {})
             initial_runs = ranking.get("initial_runs", 3)
             
+            # Check for ties in initial rankings
+            tie_groups = []
+            sorted_ranks = sorted(initial_avg_ranks.items(), key=lambda x: x[1])
+            current_tie_group = []
+            current_rank = None
+            
+            for persona, rank in sorted_ranks:
+                if current_rank is None or abs(rank - current_rank) < 0.01:
+                    current_tie_group.append((persona, rank))
+                    current_rank = rank
+                else:
+                    if len(current_tie_group) > 1:
+                        tie_groups.append(current_tie_group)
+                    current_tie_group = [(persona, rank)]
+                    current_rank = rank
+            
+            if len(current_tie_group) > 1:
+                tie_groups.append(current_tie_group)
+            
             table_html += f"""
                         <h4>Initial Average Rankings</h4>
                         <div class="feedback-block">
                             <p class="text-muted mb-3">
                                 These are the average rankings from {initial_runs} initial evaluation runs across all {len(initial_avg_ranks)} versions analyzed. 
                                 The top candidates were then selected for focused pairwise comparisons.
-                            </p>
+                            </p>"""
+            
+            # Add tie warning if ties detected
+            if tie_groups:
+                table_html += f"""
+                            <div class="alert alert-warning" style="margin-bottom: 15px;">
+                                <strong>⚠️ Ties Detected:</strong> {len(tie_groups)} group(s) of versions had identical average initial rankings. 
+                                This suggests these versions may be very similar in quality, making pairwise comparisons especially important.
+                            </div>"""
+            
+            table_html += """
                             <table class="table table-sm table-striped">
                                 <thead>
                                     <tr>
@@ -592,9 +710,13 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
                 status = "Advanced to pairwise" if persona in final_versions else "Eliminated in initial screening"
                 status_class = "text-success" if persona in final_versions else "text-muted"
                 
+                # Check if this persona is in a tie
+                in_tie = any(persona in [p for p, _ in group] for group in tie_groups)
+                tie_indicator = " [TIE]" if in_tie else ""
+                
                 table_html += f"""
                                     <tr>
-                                        <td>{persona}</td>
+                                        <td>{persona}{tie_indicator}</td>
                                         <td class="text-center">{avg_rank:.1f}</td>
                                         <td class="{status_class}"><em>{status}</em></td>
                                     </tr>
@@ -602,12 +724,32 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
             
             table_html += """
                                 </tbody>
-                            </table>
+                            </table>"""
+            
+            # Add detailed tie analysis if ties found
+            if tie_groups:
+                table_html += """
+                        <h5>Tie Analysis</h5>
+                        <div class="feedback-block">
+                            <p class="text-muted">
+                                When versions have identical average rankings, it indicates they received very similar scores 
+                                across multiple evaluation runs. This is why the smart ranking method uses pairwise comparisons 
+                                to break ties among top candidates.
+                            </p>"""
+                
+                for i, group in enumerate(tie_groups, 1):
+                    personas = [p for p, _ in group]
+                    avg_rank = group[0][1]
+                    table_html += f"""
+                            <div style="margin-bottom: 10px;">
+                                <strong>Tie Group {i}:</strong> {', '.join(personas)} (all ranked {avg_rank:.1f})
+                            </div>"""
+                
+                table_html += """
+                        </div>"""
+            
+            table_html += """
                         </div>
-"""
-        
-        table_html += """
-                    </div>
 """
         
         # Add discussion tab content
@@ -620,17 +762,23 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
                         <h4>Critics' Discussion</h4>
                         <div class="discussion">
 """
-            # Format discussion text and replace line breaks with <br>
-            discussion_text = discussion.replace("\n", "<br>")
             
-            # Clean up markdown JSON code blocks for better display
-            discussion_text = re.sub(r'```json.*?```', '<em>(See structured rankings in other tabs)</em>', discussion_text, flags=re.DOTALL)
+            # Use enhanced formatting for the discussion
+            # Temporarily bypass enhancement and use basic formatting directly
+            discussion_text = discussion.replace("\n\n", "</p><p>").replace("\n", "<br>")
+            discussion_text = re.sub(r'```json.*?```', '<em class="json-reference">[Structured rankings available in consensus tab]</em>', discussion_text, flags=re.DOTALL)
+            table_html += f"                        <div class='basic-discussion'><p>{discussion_text}</p></div>\n"
             
-            table_html += f"                        {discussion_text}\n"
-            table_html += """
+            table_html += f"""
+                        </div>
+                        <div class="discussion-toggle" onclick="toggleRawDiscussion('{chapter_id}')">Show Raw Discussion Text</div>
+                        <div class="raw-discussion" id="raw-discussion-{chapter_id}">
+                            {discussion}
                         </div>
                     </div>
 """
+        else:
+            print(f"DEBUG: No discussion found for {chapter_id}, keys: {list(ranking.keys())}")
         
         # Close the tab content div
         table_html += """
@@ -662,3 +810,122 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
 """
     
     return html 
+
+def enhance_critics_discussion(raw_discussion: str, chapter_id: str = "") -> str:
+    """
+    Use an LLM to parse and enhance the formatting of critics discussion for HTML display.
+    
+    Args:
+        raw_discussion: The raw discussion text from the ranking JSON
+        chapter_id: Chapter identifier for context
+        
+    Returns:
+        Enhanced HTML-formatted discussion
+    """
+    try:
+        # Import here to avoid circular dependencies
+        try:
+            from utils.llm_client import get_llm_client
+        except ImportError:
+            # Handle cases where utils module isn't available in the current path
+            import sys
+            import os
+            # Add the root directory to the path
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            root_dir = os.path.dirname(os.path.dirname(current_dir))
+            if root_dir not in sys.path:
+                sys.path.insert(0, root_dir)
+            from utils.llm_client import get_llm_client
+        
+        # Check if discussion is substantial enough to warrant enhancement
+        if not raw_discussion or len(raw_discussion.strip()) < 100:
+            return f"<p class='text-muted'>Limited discussion available for {chapter_id}</p>"
+        
+        # If discussion is very long, truncate it for enhancement to avoid token limits
+        max_chars = 8000  # Conservative limit to avoid LLM token issues
+        is_truncated = len(raw_discussion) > max_chars
+        discussion_to_enhance = raw_discussion[:max_chars] if is_truncated else raw_discussion
+        
+        client = get_llm_client()
+        
+        enhancement_prompt = """You are a formatting assistant that converts critic discussion text into clean, structured HTML.
+
+Your task:
+1. Parse the given critic discussion text
+2. Identify different speakers (Critic A, Critic B, consensus sections, etc.)
+3. Format it as clean HTML with appropriate styling classes
+4. Preserve all content but make it more readable
+5. Highlight key decisions and rankings
+
+Use these HTML classes:
+- critic-speaker-a: For Critic A sections
+- critic-speaker-b: For Critic B sections  
+- consensus-section: For final consensus/summary sections
+- evaluation-scores: For numeric score sections
+- key-decision: For important ranking decisions
+
+Rules:
+- Preserve all original content and meaning
+- Use <div>, <p>, <strong>, <em> as needed
+- Don't add content not in the original
+- If there are JSON blocks, replace them with: <em class="json-reference">[Structured rankings available in consensus tab]</em>
+- Use line breaks appropriately
+- Keep it concise but clear
+- IMPORTANT: End tags properly - ensure all <div> tags are closed
+
+Format as clean HTML only (no markdown, no ```html blocks)."""
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # Use the same model as critics
+            messages=[
+                {"role": "system", "content": enhancement_prompt},
+                {"role": "user", "content": f"Format this critic discussion for HTML display:\n\n{discussion_to_enhance}"}
+            ],
+            max_tokens=3000,  # Generous but not excessive
+            temperature=0.1  # Low temperature for consistent formatting
+        )
+        
+        enhanced_html = response.choices[0].message.content.strip()
+        
+        # Clean up any markdown artifacts that might have slipped through
+        enhanced_html = re.sub(r'```.*?```', '<em class="json-reference">[Structured rankings available in consensus tab]</em>', enhanced_html, flags=re.DOTALL)
+        enhanced_html = re.sub(r'```', '', enhanced_html)
+        
+        # Basic validation - check if HTML is properly formed
+        open_divs = enhanced_html.count('<div')
+        close_divs = enhanced_html.count('</div>')
+        
+        # If we have unclosed divs, try to fix them
+        if open_divs > close_divs:
+            # Add missing closing divs
+            for _ in range(open_divs - close_divs):
+                enhanced_html += '</div>'
+        
+        # If the LLM response was truncated or malformed, fall back to simple formatting
+        if not enhanced_html or len(enhanced_html.strip()) < 50:
+            raise ValueError("Enhanced discussion too short or empty")
+        
+        # Add truncation notice if original was truncated
+        if is_truncated:
+            enhanced_html += """
+            <div class="alert alert-info mt-3">
+                <small><em>Note: Discussion was truncated for formatting. See raw discussion below for complete content.</em></small>
+            </div>"""
+        
+        return enhanced_html
+        
+    except Exception as e:
+        print(f"DEBUG: Enhancement failed, using fallback: {e}")
+        # Fallback to basic formatting if enhancement fails
+        # IMPORTANT: Make sure we actually include the content!
+        fallback_html = raw_discussion.replace("\n\n", "</p><p>").replace("\n", "<br>")
+        fallback_html = f"<p>{fallback_html}</p>"
+        fallback_html = re.sub(r'```json.*?```', '<em class="json-reference">[Structured rankings available in consensus tab]</em>', fallback_html, flags=re.DOTALL)
+        
+        # Add a note about the formatting failure
+        fallback_html = f"""<div class="alert alert-warning">
+            <small>Note: Enhanced formatting unavailable ({str(e)}). Showing basic formatting.</small>
+        </div>
+        {fallback_html}"""
+        
+        return fallback_html

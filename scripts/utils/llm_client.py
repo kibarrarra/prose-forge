@@ -90,7 +90,7 @@ class UnifiedClient:
         self,
         model: str,
         messages: list[dict],
-        temperature: float = 0.7,
+        temperature: float = 0.5,
         max_tokens: int = 1024,
         **kwargs,
     ):
