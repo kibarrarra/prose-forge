@@ -38,3 +38,19 @@ VOICE_DIR   = CONFIG_DIR / "voice_specs"
 # guarantee critical folders exist at import-time
 for p in (LOG_DIR,):
     p.mkdir(exist_ok=True)
+
+
+def get_experiment_label(path: Path) -> str:
+    """Return a human-friendly label for an experiment directory.
+
+    If *path* contains ``auditions/<experiment>/round_N`` (or ``final``), the
+    label will be ``"<experiment> (round_N)"``. If no experiment name is
+    detected, the directory name is returned unchanged.
+    """
+    parts = Path(path).parts
+    if "auditions" in parts:
+        idx = parts.index("auditions")
+        if idx + 1 < len(parts):
+            experiment = parts[idx + 1]
+            return f"{experiment} ({Path(path).name})"
+    return Path(path).name

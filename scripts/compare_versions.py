@@ -31,7 +31,7 @@ from core.html_generation import generate_html_output, generate_ranking_html
 from core.elo_ranking import smart_rank_chapter_versions, pairwise_rank_chapter_versions, rank_chapter_versions
 
 # Import utilities
-from utils.paths import ROOT
+from utils.paths import ROOT, get_experiment_label
 from utils.logging_helper import get_logger
 from utils.io_helpers import read_utf8
 
@@ -549,31 +549,13 @@ def main():
             dir1_path = pathlib.Path(args.dir1)
             dir2_path = pathlib.Path(args.dir2)
             
-            # Look for 'auditions' in path to get experiment name
-            dir1_parts = dir1_path.parts
-            dir2_parts = dir2_path.parts
-            
-            dir1_name = ""
-            dir2_name = ""
-            
-            # Try to construct name like "experiment_round" from path
-            if 'auditions' in dir1_parts:
-                idx = dir1_parts.index('auditions')
-                if idx + 1 < len(dir1_parts):  # Make sure there's an experiment name after 'auditions'
-                    dir1_name = f"{dir1_parts[idx+1]}_{dir1_path.name}"
-                else:
-                    dir1_name = dir1_path.name
-            else:
-                dir1_name = dir1_path.name
-                
-            if 'auditions' in dir2_parts:
-                idx = dir2_parts.index('auditions')
-                if idx + 1 < len(dir2_parts):  # Make sure there's an experiment name after 'auditions'
-                    dir2_name = f"{dir2_parts[idx+1]}_{dir2_path.name}"
-                else:
-                    dir2_name = dir2_path.name
-            else:
-                dir2_name = dir2_path.name
+            # Derive descriptive labels for each directory
+            dir1_label = get_experiment_label(dir1_path)
+            dir2_label = get_experiment_label(dir2_path)
+
+            # Use labels to build an output filename-friendly string
+            dir1_name = dir1_label.replace(" ", "_").replace("(", "").replace(")", "")
+            dir2_name = dir2_label.replace(" ", "_").replace("(", "").replace(")", "")
             
             out_path = out_dir / f"compare_{dir1_name}_vs_{dir2_name}{output_ext}"
         
