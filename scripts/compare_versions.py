@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 """
-compare_versions_refactored.py – Refactored version comparison tool
+compare_versions.py – Refactored version comparison tool
 
 A cleaner, modular version of the original compare_versions.py script.
 This version uses separate modules for different functionality areas.
 
 Usage:
-    python scripts/compare_versions_refactored.py lotm_0001 lotm_0002 --versions cosmic_clarity_1 cosmic_clarity_3 lovecraft_2
-    python scripts/compare_versions_refactored.py lotm_0001 --final-versions cosmic_clarity lovecraft
-    python scripts/compare_versions_refactored.py --dir1 drafts/auditions/cosmic_clarity/round_1 --dir2 drafts/auditions/lovecraft/round_1 --output comparison.json
-    python scripts/compare_versions_refactored.py --all-finals --addl-dirs drafts/addl_drafts
+    python scripts/compare_versions.py lotm_0001 lotm_0002 --versions cosmic_clarity_1 cosmic_clarity_3 lovecraft_2
+    python scripts/compare_versions.py lotm_0001 --final-versions cosmic_clarity lovecraft
+    python scripts/compare_versions.py --dir1 drafts/auditions/cosmic_clarity/round_1 --dir2 drafts/auditions/lovecraft/round_1 --output comparison.json
+    python scripts/compare_versions.py --all-finals --addl-dirs drafts/addl_drafts
 """
 
 import argparse
@@ -367,7 +367,7 @@ def rank_all_chapters(
         console.print(f"[bold red]✗ HTML generation failed: {e}[/]")
         console.print(f"[yellow]Rankings are still available in: {intermediate_file}[/]")
         console.print(f"[yellow]You can retry HTML generation with:[/]")
-        console.print(f"[cyan]  python scripts/compare_versions_refactored.py --generate-html-from {intermediate_file} --output {output_path}[/]")
+        console.print(f"[cyan]  python scripts/compare_versions.py --generate-html-from {intermediate_file} --output {output_path}[/]")
         raise e
     
     # Show completion summary
