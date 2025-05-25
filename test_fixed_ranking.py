@@ -12,7 +12,7 @@ from pathlib import Path
 scripts_dir = Path(__file__).parent / "scripts"
 sys.path.insert(0, str(scripts_dir))
 
-from compare_versions_refactored import rank_all_chapters
+from compare_versions import rank_all_chapters
 
 def main():
     """Test the fixed ranking system with validation."""
