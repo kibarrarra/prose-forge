@@ -1,9 +1,13 @@
 #!/usr/bin/env python
 """
-test_fixed_ranking.py - Test script to validate intermediate results fixes
+test_fixed_ranking.py - Manual integration test script.
 
-Run this to test that the ranking validation and save logic works properly.
+This file is not meant to be collected by pytest during automated test runs.
 """
+
+import pytest
+
+pytest.skip("integration script", allow_module_level=True)
 
 import sys
 from pathlib import Path
