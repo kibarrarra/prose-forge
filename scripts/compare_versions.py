@@ -39,6 +39,109 @@ from utils.io_helpers import read_utf8
 console = Console()
 log = get_logger()
 
+
+def validate_ranking_result(ranking_result: Dict[str, Any], chapter_id: str, num_versions: int) -> bool:
+    """Validate that a ranking result is complete and valid."""
+    if ranking_result is None:
+        log.warning(f"Ranking result for {chapter_id} is None")
+        return False
+
+    if "error" in ranking_result:
+        log.warning(
+            f"Ranking result for {chapter_id} contains error: {ranking_result['error']}"
+        )
+        return False
+
+    # Check for required fields
+    required_fields = ["chapter_id", "versions", "table"]
+    for field in required_fields:
+        if field not in ranking_result:
+            log.warning(
+                f"Ranking result for {chapter_id} missing required field: {field}"
+            )
+            return False
+
+    # Validate table structure
+    table = ranking_result.get("table", [])
+    if not isinstance(table, list) or len(table) == 0:
+        log.warning(
+            f"Ranking result for {chapter_id} has empty or invalid table"
+        )
+        return False
+
+    # Check if discussion is truncated (common sign of incomplete LLM response)
+    discussion = ranking_result.get("discussion", "")
+    if discussion and not discussion.strip().endswith((".", "!", "?", "}", "]", "```")):
+        log.warning(
+            f"Ranking result for {chapter_id} appears to have truncated discussion"
+        )
+        return False
+
+    # Check if we have reasonable rankings (at least top ranked item)
+    top_entry = table[0] if table else None
+    if not top_entry or "rank" not in top_entry or "id" not in top_entry:
+        log.warning(
+            f"Ranking result for {chapter_id} has malformed top ranking entry"
+        )
+        return False
+
+    return True
+
+
+def save_intermediate_results(
+    rankings: List[Dict[str, Any]],
+    intermediate_file: pathlib.Path,
+    operation: str = "",
+) -> None:
+    """Safely save intermediate results with validation and backup."""
+    try:
+        # Filter out invalid rankings before saving
+        valid_rankings = []
+        invalid_count = 0
+
+        for ranking in rankings:
+            if ranking is None:
+                invalid_count += 1
+                continue
+
+            # Basic validation
+            if isinstance(ranking, dict) and "chapter_id" in ranking:
+                valid_rankings.append(ranking)
+            else:
+                invalid_count += 1
+                log.warning(f"Skipping invalid ranking result: {ranking}")
+
+        # Create backup of existing file if it exists
+        if intermediate_file.exists():
+            backup_file = intermediate_file.with_suffix(
+                f".backup_{datetime.now().strftime('%H%M%S')}.json"
+            )
+            try:
+                import shutil
+
+                shutil.copy2(intermediate_file, backup_file)
+                console.print(f"[dim]Created backup: {backup_file}[/]")
+            except Exception as backup_err:
+                log.warning(f"Failed to create backup: {backup_err}")
+
+        # Save the valid rankings
+        with open(intermediate_file, "w", encoding="utf-8") as f:
+            json.dump(valid_rankings, f, indent=2, ensure_ascii=False)
+
+        status_msg = f"Saved {len(valid_rankings)} valid rankings"
+        if invalid_count > 0:
+            status_msg += f" (skipped {invalid_count} invalid)"
+        if operation:
+            status_msg += f" - {operation}"
+
+        console.print(f"[dim]{status_msg}[/]")
+
+    except Exception as save_err:
+        log.error(f"Failed to save intermediate results: {save_err}")
+        console.print(
+            f"[bold red]✗ Failed to save intermediate results: {save_err}[/]"
+        )
+
 def rank_all_chapters(
     output_path: pathlib.Path, 
     addl_dirs: Optional[pathlib.Path] = None, 
@@ -65,87 +168,7 @@ def rank_all_chapters(
         load_from_json: Load existing ranking results from JSON file instead of running new rankings
     """
     
-    def validate_ranking_result(ranking_result: Dict[str, Any], chapter_id: str, num_versions: int) -> bool:
-        """Validate that a ranking result is complete and valid."""
-        if ranking_result is None:
-            log.warning(f"Ranking result for {chapter_id} is None")
-            return False
-            
-        if "error" in ranking_result:
-            log.warning(f"Ranking result for {chapter_id} contains error: {ranking_result['error']}")
-            return False
-            
-        # Check for required fields
-        required_fields = ["chapter_id", "versions", "table"]
-        for field in required_fields:
-            if field not in ranking_result:
-                log.warning(f"Ranking result for {chapter_id} missing required field: {field}")
-                return False
-        
-        # Validate table structure
-        table = ranking_result.get("table", [])
-        if not isinstance(table, list) or len(table) == 0:
-            log.warning(f"Ranking result for {chapter_id} has empty or invalid table")
-            return False
-            
-        # Check if discussion is truncated (common sign of incomplete LLM response)
-        discussion = ranking_result.get("discussion", "")
-        if discussion and not discussion.strip().endswith((".", "!", "?", "}", "]", "```")):
-            log.warning(f"Ranking result for {chapter_id} appears to have truncated discussion")
-            return False
-            
-        # Check if we have reasonable rankings (at least top ranked item)
-        top_entry = table[0] if table else None
-        if not top_entry or "rank" not in top_entry or "id" not in top_entry:
-            log.warning(f"Ranking result for {chapter_id} has malformed top ranking entry")
-            return False
-            
-        return True
-    
-    def save_intermediate_results(rankings: List[Dict[str, Any]], intermediate_file: pathlib.Path, operation: str = ""):
-        """Safely save intermediate results with validation and backup."""
-        try:
-            # Filter out invalid rankings before saving
-            valid_rankings = []
-            invalid_count = 0
-            
-            for ranking in rankings:
-                if ranking is None:
-                    invalid_count += 1
-                    continue
-                    
-                # Basic validation
-                if isinstance(ranking, dict) and "chapter_id" in ranking:
-                    valid_rankings.append(ranking)
-                else:
-                    invalid_count += 1
-                    log.warning(f"Skipping invalid ranking result: {ranking}")
-            
-            # Create backup of existing file if it exists
-            if intermediate_file.exists():
-                backup_file = intermediate_file.with_suffix(f".backup_{datetime.now().strftime('%H%M%S')}.json")
-                try:
-                    import shutil
-                    shutil.copy2(intermediate_file, backup_file)
-                    console.print(f"[dim]Created backup: {backup_file}[/]")
-                except Exception as backup_err:
-                    log.warning(f"Failed to create backup: {backup_err}")
-            
-            # Save the valid rankings
-            with open(intermediate_file, 'w', encoding='utf-8') as f:
-                json.dump(valid_rankings, f, indent=2, ensure_ascii=False)
-            
-            status_msg = f"Saved {len(valid_rankings)} valid rankings"
-            if invalid_count > 0:
-                status_msg += f" (skipped {invalid_count} invalid)"
-            if operation:
-                status_msg += f" - {operation}"
-                
-            console.print(f"[dim]{status_msg}[/]")
-            
-        except Exception as save_err:
-            log.error(f"Failed to save intermediate results: {save_err}")
-            console.print(f"[bold red]✗ Failed to save intermediate results: {save_err}[/]")
+    # Use global validation and saving helpers
 
     # If loading from existing JSON, skip ranking and go straight to HTML generation
     if load_from_json and load_from_json.exists():
