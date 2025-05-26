@@ -14,6 +14,7 @@ from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, S
 
 from .file_loaders import load_version_text, load_texts_from_dir, load_original_text
 from .critics import get_comparison_feedback
+from utils.paths import get_experiment_label
 
 console = Console()
 
@@ -77,33 +78,9 @@ def compare_directories(dir1: pathlib.Path, dir2: pathlib.Path) -> Dict[str, Any
     dir2_name = dir2.name
     
     # Extract more descriptive names for the versions
-    # Look for 'auditions' in the path to get experiment name
-    dir1_parts = dir1.parts
-    dir2_parts = dir2.parts
-    
-    dir1_full_name = ""
-    dir2_full_name = ""
-    
-    # Try to construct a more descriptive name
-    if 'auditions' in dir1_parts:
-        idx = dir1_parts.index('auditions')
-        if idx + 1 < len(dir1_parts):  # Make sure there's an experiment name after 'auditions'
-            experiment_name = dir1_parts[idx+1]
-            dir1_full_name = f"{experiment_name} ({dir1.name})"
-        else:
-            dir1_full_name = dir1.name
-    else:
-        dir1_full_name = dir1.name
-        
-    if 'auditions' in dir2_parts:
-        idx = dir2_parts.index('auditions')
-        if idx + 1 < len(dir2_parts):  # Make sure there's an experiment name after 'auditions'
-            experiment_name = dir2_parts[idx+1]
-            dir2_full_name = f"{experiment_name} ({dir2.name})"
-        else:
-            dir2_full_name = dir2.name
-    else:
-        dir2_full_name = dir2.name
+    # Construct descriptive version labels
+    dir1_full_name = get_experiment_label(dir1)
+    dir2_full_name = get_experiment_label(dir2)
     
     console.print(f"[bold blue]Comparing directories:[/] [cyan]{dir1_full_name}[/] vs [cyan]{dir2_full_name}[/]")
     
