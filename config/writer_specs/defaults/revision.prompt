@@ -1,0 +1,26 @@
+SYSTEM:
+You are the same 'Chapter-Author'.
+You MUST apply every change listed under "must" exactly as specified—no omissions.
+You MAY apply changes under "nice" if they genuinely improve clarity, mood, or pacing.
+Do NOT introduce new plot points, foreshadowing, or factual inconsistencies outside the RAW ending beat.
+You MUST keep the word count approximately the same as the previous draft. You should strive to make the fewest possible edits while accommodating editor demands.
+---
+VOICE SPEC
+----------
+{voice_spec}
+----------
+
+USER:
+PREVIOUS DRAFT:
+{current_draft}
+
+CHANGE LIST (JSON):
+{change_list}
+
+{raw_ending_section}
+
+SELF-CHECK:
+1. List, in bullet form, any MUST item that remains unimplemented.
+2. List any new object, event, or future plan that was not present in the PREVIOUS DRAFT.
+Then rewrite the draft to fix these issues.  Return FINAL only—no extra commentary or labels.
+**CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...". 

@@ -1,31 +1,31 @@
 """
-elo_ranking.py - Elo rating system and advanced ranking algorithms
+elo_ranking.py - Chapter version ranking using ELO-style scoring
 
-This module handles:
-- Elo rating calculations and updates
-- Smart ranking with initial filtering and pairwise comparisons
-- Ranking result formatting and analysis
+This module provides sophisticated ranking algorithms for comparing
+multiple versions of the same chapter, using critic feedback and
+statistical analysis.
 """
 
-import random
-import statistics
 import json
+import random
 import re
+import statistics
+import time
 from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime
 
 from rich.console import Console
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, SpinnerColumn
 
-from utils.paths import ROOT
-from utils.logging_helper import get_logger
+from scripts.utils.paths import ROOT
+from scripts.utils.logging_helper import get_logger
 from .file_loaders import load_original_text
 from .critics import CRITIC_SYSTEM_PROMPT, get_scoring_rubric
-from utils.llm_client import get_llm_client
+from scripts.utils.llm_client import get_llm_client
 
 console = Console()
 log = get_logger()
-MODEL = "gpt-4o-mini"
+MODEL = "gpt-4.1-mini"
 
 class Elo:
     """Minimal Elo rating helper."""
@@ -642,51 +642,59 @@ def smart_rank_chapter_versions(
         comparison_count = 0
         pair_count = 0
         
-        for i in range(n_top):
-            for j in range(i + 1, n_top):
-                left, right = top_versions[i], top_versions[j]
-                pair_count += 1
-                
-                # Run comparison in both orders to cancel position bias
-                for swap in [False, True]:
-                    first, second = (right, left) if swap else (left, right)
-                    comparison_count += 1
+        try:
+            for i in range(n_top):
+                for j in range(i + 1, n_top):
+                    left, right = top_versions[i], top_versions[j]
+                    pair_count += 1
                     
-                    # More detailed progress description
-                    order_desc = "A→B" if not swap else "B→A"
-                    
-                    progress.update(pairwise_task, 
-                        description=f"[magenta]Pair {pair_count}/{total_pairs}: {first[0]} vs {second[0]} ({order_desc}) - Comparison {comparison_count}/{total_comparisons}[/]"
-                    )
-                    
-                    try:
-                        result = rank_chapter_versions(
-                            chapter_id,
-                            [first, second],
-                            original_text=original,
-                            output_console=progress.console  # Use progress-aware console
+                    # Run comparison in both orders to cancel position bias
+                    for swap in [False, True]:
+                        first, second = (right, left) if swap else (left, right)
+                        comparison_count += 1
+                        
+                        # More detailed progress description
+                        order_desc = "A→B" if not swap else "B→A"
+                        
+                        progress.update(pairwise_task, 
+                            description=f"[magenta]Pair {pair_count}/{total_pairs}: {first[0]} vs {second[0]} ({order_desc}) - Comparison {comparison_count}/{total_comparisons}[/]"
                         )
                         
-                        table = result.get("table", [])
-                        if table:
-                            table.sort(key=lambda x: x.get("rank", 0))
-                            winner_id = table[0].get("id", "").replace("DRAFT_", "")
+                        try:
+                            result = rank_chapter_versions(
+                                chapter_id,
+                                [first, second],
+                                original_text=original,
+                                output_console=progress.console  # Use progress-aware console
+                            )
                             
-                            # Store this comparison result
-                            comparison_results.append((left[0], right[0], winner_id, first[0]))
-                            
-                            if winner_id == first[0]:
-                                elo.update(first[0], second[0])
+                            table = result.get("table", [])
+                            if table:
+                                table.sort(key=lambda x: x.get("rank", 0))
+                                winner_id = table[0].get("id", "").replace("DRAFT_", "")
+                                
+                                # Store this comparison result
+                                comparison_results.append((left[0], right[0], winner_id, first[0]))
+                                
+                                if winner_id == first[0]:
+                                    elo.update(first[0], second[0])
+                                else:
+                                    elo.update(second[0], first[0])
                             else:
-                                elo.update(second[0], first[0])
-                        else:
-                            progress.console.log(f"[yellow]⚠ No ranking returned for {first[0]} vs {second[0]}[/yellow]")
-                            
-                    except Exception as e:
-                        progress.console.log(f"[red]✗ Pairwise comparison failed: {first[0]} vs {second[0]}: {e}[/red]")
-                        continue
-                    
-                    progress.update(pairwise_task, advance=1)
+                                progress.console.log(f"[yellow]⚠ No ranking returned for {first[0]} vs {second[0]}[/yellow]")
+                                
+                        except Exception as e:
+                            progress.console.log(f"[red]✗ Pairwise comparison failed: {first[0]} vs {second[0]}: {e}[/red]")
+                            # Continue with other comparisons even if one fails
+                            continue
+                        
+                        progress.update(pairwise_task, advance=1)
+        
+        except Exception as e:
+            progress.console.log(f"[red]✗ Pairwise comparison loop failed: {e}[/red]")
+            # If the entire pairwise loop fails, we can still return results based on initial rankings
+            import traceback
+            progress.console.log(f"[red]Traceback: {traceback.format_exc()}[/red]")
         
         # Remove the pairwise task and show bias check results
         progress.remove_task(pairwise_task)
@@ -866,51 +874,59 @@ def smart_rank_chapter_versions(
             comparison_count = 0
             pair_count = 0
             
-            for i in range(n_top):
-                for j in range(i + 1, n_top):
-                    left, right = top_versions[i], top_versions[j]
-                    pair_count += 1
-                    
-                    # Run comparison in both orders to cancel position bias
-                    for swap in [False, True]:
-                        first, second = (right, left) if swap else (left, right)
-                        comparison_count += 1
+            try:
+                for i in range(n_top):
+                    for j in range(i + 1, n_top):
+                        left, right = top_versions[i], top_versions[j]
+                        pair_count += 1
                         
-                        # More detailed progress description
-                        order_desc = "A→B" if not swap else "B→A"
-                        
-                        standalone_progress.update(pairwise_task, 
-                            description=f"[magenta]Pair {pair_count}/{total_pairs}: {first[0]} vs {second[0]} ({order_desc}) - Comparison {comparison_count}/{total_comparisons}[/]"
-                        )
-                        
-                        try:
-                            result = rank_chapter_versions(
-                                chapter_id,
-                                [first, second],
-                                original_text=original,
-                                output_console=standalone_progress.console  # Use progress-aware console
+                        # Run comparison in both orders to cancel position bias
+                        for swap in [False, True]:
+                            first, second = (right, left) if swap else (left, right)
+                            comparison_count += 1
+                            
+                            # More detailed progress description
+                            order_desc = "A→B" if not swap else "B→A"
+                            
+                            standalone_progress.update(pairwise_task, 
+                                description=f"[magenta]Pair {pair_count}/{total_pairs}: {first[0]} vs {second[0]} ({order_desc}) - Comparison {comparison_count}/{total_comparisons}[/]"
                             )
                             
-                            table = result.get("table", [])
-                            if table:
-                                table.sort(key=lambda x: x.get("rank", 0))
-                                winner_id = table[0].get("id", "").replace("DRAFT_", "")
+                            try:
+                                result = rank_chapter_versions(
+                                    chapter_id,
+                                    [first, second],
+                                    original_text=original,
+                                    output_console=standalone_progress.console  # Use progress-aware console
+                                )
                                 
-                                # Store this comparison result
-                                comparison_results.append((left[0], right[0], winner_id, first[0]))
-                                
-                                if winner_id == first[0]:
-                                    elo.update(first[0], second[0])
+                                table = result.get("table", [])
+                                if table:
+                                    table.sort(key=lambda x: x.get("rank", 0))
+                                    winner_id = table[0].get("id", "").replace("DRAFT_", "")
+                                    
+                                    # Store this comparison result
+                                    comparison_results.append((left[0], right[0], winner_id, first[0]))
+                                    
+                                    if winner_id == first[0]:
+                                        elo.update(first[0], second[0])
+                                    else:
+                                        elo.update(second[0], first[0])
                                 else:
-                                    elo.update(second[0], first[0])
-                            else:
-                                standalone_progress.console.log(f"[yellow]⚠ No ranking returned for {first[0]} vs {second[0]}[/yellow]")
-                                
-                        except Exception as e:
-                            standalone_progress.console.log(f"[red]✗ Pairwise comparison failed: {first[0]} vs {second[0]}: {e}[/red]")
-                            continue
-                        
-                        standalone_progress.update(pairwise_task, advance=1)
+                                    standalone_progress.console.log(f"[yellow]⚠ No ranking returned for {first[0]} vs {second[0]}[/yellow]")
+                                    
+                            except Exception as e:
+                                standalone_progress.console.log(f"[red]✗ Pairwise comparison failed: {first[0]} vs {second[0]}: {e}[/red]")
+                                # Continue with other comparisons even if one fails
+                                continue
+                            
+                            standalone_progress.update(pairwise_task, advance=1)
+            
+            except Exception as e:
+                standalone_progress.console.log(f"[red]✗ Pairwise comparison loop failed: {e}[/red]")
+                # If the entire pairwise loop fails, we can still return results based on initial rankings
+                import traceback
+                standalone_progress.console.log(f"[red]Traceback: {traceback.format_exc()}[/red]")
             
             # Stop progress for final summaries
             standalone_progress.stop()
@@ -962,6 +978,18 @@ def smart_rank_chapter_versions(
     
     # Step 4: Generate final ranking based on Elo scores
     final_leaderboard = elo.leaderboard()
+    
+    # Fallback: If we have no Elo results (pairwise comparisons failed), use initial rankings
+    if not final_leaderboard or len(final_leaderboard) == 0:
+        active_console.print(f"[yellow]⚠ No Elo results available, falling back to initial rankings[/]")
+        # Create leaderboard from initial average rankings
+        sorted_by_avg = sorted(avg_ranks.items(), key=lambda x: x[1])
+        final_leaderboard = [(persona, 1000.0 - (rank * 10)) for persona, rank in sorted_by_avg]
+        # Ensure we only include top candidates if we had them
+        if top_versions:
+            top_persona_names = [v[0] for v in top_versions]
+            final_leaderboard = [(p, r) for p, r in final_leaderboard if p in top_persona_names]
+    
     active_console.print(f"[bold green]Final rankings for {chapter_id}:[/] {', '.join([name for name, _ in final_leaderboard])}")
     
     # Restart progress if we were using an external progress instance (to keep parent progress working)
@@ -974,6 +1002,12 @@ def smart_rank_chapter_versions(
     
     # Create final ranking in the expected format
     final_table = []
+    
+    # Safety check: ensure we have top_versions to work with
+    if not top_versions:
+        active_console.print(f"[yellow]⚠ No top_versions available, using all versions for final table[/]")
+        top_versions = versions
+    
     for rank, (persona, elo_rating) in enumerate(final_leaderboard, 1):
         # Find the persona in top_versions to get their average initial scores
         persona_version = next((v for v in top_versions if v[0] == persona), None)

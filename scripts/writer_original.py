@@ -580,8 +580,8 @@ def parse_args() -> argparse.Namespace:
                    help="Directory for audition drafts (e.g. drafts/auditions/persona_1)")
     p.add_argument("--critic-feedback", type=DIR,
                    help="JSON file containing critic feedback for final version")
-    p.add_argument("--model", type=str, default=os.getenv("WRITER_MODEL", "claude-3-opus-20240229"),
-                   help="LLM model name to use (e.g. gpt-4o, claude-3-opus-20240229)")
+    p.add_argument("--model", type=str, default=os.getenv("WRITER_MODEL", "claude-opus-4-20250514"),
+                   help="LLM model name to use (e.g. gpt-4o, claude-opus-4-20250514)")
     p.add_argument("--segmented-first-draft", action="store_true",
                    help="Enable segmented first draft mode")
     p.add_argument("--chunk-size", type=int,

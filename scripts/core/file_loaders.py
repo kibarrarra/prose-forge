@@ -10,9 +10,9 @@ This module handles:
 
 import pathlib
 from typing import Dict, List, Tuple
-from utils.io_helpers import read_utf8
-from utils.paths import ROOT, CTX_DIR
-from utils.logging_helper import get_logger
+from scripts.utils.io_helpers import read_utf8
+from scripts.utils.paths import ROOT, CTX_DIR
+from scripts.utils.logging_helper import get_logger
 
 log = get_logger()
 
@@ -105,6 +105,10 @@ def gather_final_versions(
     # Walk through all audition directories
     for persona_dir in root_dir.iterdir():
         if not persona_dir.is_dir():
+            continue
+            
+        # Skip the comparisons folder
+        if persona_dir.name == "comparisons":
             continue
             
         final_dir = persona_dir / "final"

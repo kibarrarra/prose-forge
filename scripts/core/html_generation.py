@@ -12,6 +12,19 @@ import re
 from typing import Dict, List, Any
 from datetime import datetime
 
+# Import scoring criteria from critics module for consistency
+try:
+    from .critics import SCORING_CRITERIA, get_criteria_by_json_field
+except ImportError:
+    # Fallback for when module is called from different contexts
+    import sys
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    from core.critics import SCORING_CRITERIA, get_criteria_by_json_field
+
 def generate_html_output(result: Dict[str, Any]) -> str:
     """Convert comparison results to a readable HTML page."""
     # Generate a clean, readable HTML document with Bootstrap styling
@@ -502,12 +515,15 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
                             <thead>
                                 <tr>
                                     <th>Rank</th>
-                                    <th>Version</th>
-                                    <th>Clarity</th>
-                                    <th>Tone</th>
-                                    <th>Plot Fidelity</th>
-                                    <th>Tone Fidelity</th>
-                                    <th>Overall</th>
+                                    <th>Version</th>"""
+        
+        # Add column headers for each scoring criterion
+        for criterion in SCORING_CRITERIA:
+            table_html += f"""
+                                    <th>{criterion['short_name']}</th>"""
+        
+        # Add total column
+        table_html += """
                                     <th>Total</th>"""
         
         # Add extra columns for smart ranking
@@ -535,20 +551,20 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
                 else:
                     persona = draft_id
             
-            # Get scores - handle both new format (plot_fidelity, tone_fidelity) and old format (faithfulness)
-            clarity = entry.get("clarity", 0)
-            tone = entry.get("tone", 0)
+            # Get scores dynamically based on SCORING_CRITERIA
+            scores = {}
+            total = 0
             
-            # Handle backward compatibility with old "faithfulness" field
-            plot_fidelity = entry.get("plot_fidelity", 0)
-            tone_fidelity = entry.get("tone_fidelity", 0)
-            if plot_fidelity == 0 and tone_fidelity == 0 and "faithfulness" in entry:
-                # Use old faithfulness score for both if new fields are not present
-                plot_fidelity = entry.get("faithfulness", 0)
-                tone_fidelity = entry.get("faithfulness", 0)
-            
-            overall = entry.get("overall", 0)
-            total = clarity + tone + plot_fidelity + tone_fidelity + overall
+            for criterion in SCORING_CRITERIA:
+                field_name = criterion['json_field']
+                score = entry.get(field_name, 0)
+                
+                # Handle backward compatibility with old "faithfulness" field
+                if field_name in ['plot_fidelity', 'tone_fidelity'] and score == 0 and 'faithfulness' in entry:
+                    score = entry.get('faithfulness', 0)
+                
+                scores[field_name] = score
+                total += score
             
             # Determine badge class
             badge_class = f"badge-{rank}" if rank <= 3 else "badge-other"
@@ -557,12 +573,17 @@ def generate_ranking_html(rankings: List[Dict[str, Any]]) -> str:
             table_html += f"""
                                 <tr class="{'rank-1' if rank == 1 else ''}">
                                     <td style="padding-left: 30px;"><span class="rank-badge {badge_class}">{rank}</span></td>
-                                    <td>{persona}</td>
-                                    <td class="score-cell">{clarity}</td>
-                                    <td class="score-cell">{tone}</td>
-                                    <td class="score-cell">{plot_fidelity}</td>
-                                    <td class="score-cell">{tone_fidelity}</td>
-                                    <td class="score-cell">{overall}</td>
+                                    <td>{persona}</td>"""
+            
+            # Add score cells for each criterion
+            for criterion in SCORING_CRITERIA:
+                field_name = criterion['json_field']
+                score = scores.get(field_name, 0)
+                table_html += f"""
+                                    <td class="score-cell">{score}</td>"""
+            
+            # Add total cell
+            table_html += f"""
                                     <td class="score-cell">{total}</td>"""
             
             # Add extra columns for smart ranking
@@ -876,7 +897,7 @@ Rules:
 Format as clean HTML only (no markdown, no ```html blocks)."""
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Use the same model as critics
+            model="gpt-4.1-mini",  # Use the same model as critics
             messages=[
                 {"role": "system", "content": enhancement_prompt},
                 {"role": "user", "content": f"Format this critic discussion for HTML display:\n\n{discussion_to_enhance}"}

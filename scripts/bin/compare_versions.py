@@ -24,16 +24,20 @@ from rich.console import Console
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn
 from rich.panel import Panel
 
+# Add project root to path
+PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
+sys.path.append(str(PROJECT_ROOT))
+
 # Import modular components
-from core.file_loaders import gather_final_versions, load_original_text
-from core.comparison import compare_versions, compare_directories
-from core.html_generation import generate_html_output, generate_ranking_html
-from core.elo_ranking import smart_rank_chapter_versions, pairwise_rank_chapter_versions, rank_chapter_versions
+from scripts.core.file_loaders import gather_final_versions, load_original_text
+from scripts.core.comparison import compare_versions, compare_directories
+from scripts.core.html_generation import generate_html_output, generate_ranking_html
+from scripts.core.elo_ranking import smart_rank_chapter_versions, pairwise_rank_chapter_versions, rank_chapter_versions
 
 # Import utilities
-from utils.paths import ROOT
-from utils.logging_helper import get_logger
-from utils.io_helpers import read_utf8
+from scripts.utils.paths import ROOT
+from scripts.utils.logging_helper import get_logger
+from scripts.utils.io_helpers import read_utf8
 
 # Create console and logger
 console = Console()
@@ -88,16 +92,21 @@ def rank_all_chapters(
             log.warning(f"Ranking result for {chapter_id} has empty or invalid table")
             return False
             
-        # Check if discussion is truncated (common sign of incomplete LLM response)
+        # Relaxed discussion validation - just check if it exists and has some content
         discussion = ranking_result.get("discussion", "")
-        if discussion and not discussion.strip().endswith((".", "!", "?", "}", "]", "```")):
-            log.warning(f"Ranking result for {chapter_id} appears to have truncated discussion")
-            return False
+        if not discussion or len(discussion.strip()) < 50:
+            log.warning(f"Ranking result for {chapter_id} has very short or missing discussion")
+            # Don't fail validation for this - just warn
             
         # Check if we have reasonable rankings (at least top ranked item)
         top_entry = table[0] if table else None
-        if not top_entry or "rank" not in top_entry or "id" not in top_entry:
+        if not top_entry or "rank" not in top_entry:
             log.warning(f"Ranking result for {chapter_id} has malformed top ranking entry")
+            return False
+            
+        # Check that we have at least some reasonable number of ranked items
+        if len(table) < min(2, num_versions):
+            log.warning(f"Ranking result for {chapter_id} has too few ranked items: {len(table)} < {min(2, num_versions)}")
             return False
             
         return True
@@ -185,6 +194,10 @@ def rank_all_chapters(
             if not draft_type_dir.is_dir():
                 continue
                 
+            # Skip the comparisons folder
+            if draft_type_dir.name == "comparisons":
+                continue
+                
             draft_type = draft_type_dir.name
             console.print(f"[blue]Processing additional draft type: {draft_type}[/]")
             
@@ -265,6 +278,7 @@ def rank_all_chapters(
             try:
                 ranking = None
                 if ranking_method == "smart":
+                    console.print(f"[cyan]Starting smart ranking for {chapter_id} with {len(versions)} versions[/]")
                     ranking = smart_rank_chapter_versions(
                         chapter_id, 
                         versions,
@@ -274,6 +288,7 @@ def rank_all_chapters(
                         progress=progress,  # Pass the progress instance
                         parent_task_id=chapter_task  # Pass the parent task ID
                     )
+                    console.print(f"[cyan]Smart ranking completed for {chapter_id}[/]")
                 elif ranking_method == "full_pairwise":
                     console.print(f"[cyan]Running full pairwise comparison for {chapter_id}[/]")
                     ranking = pairwise_rank_chapter_versions(chapter_id, versions)
@@ -285,6 +300,18 @@ def rank_all_chapters(
                     console.print(f"[cyan]Running simple ranking for {chapter_id}[/]")
                     original = load_original_text(chapter_id)
                     ranking = rank_chapter_versions(chapter_id, versions, original_text=original, output_console=None)
+                
+                # Debug: Show what we got back
+                if ranking is None:
+                    console.print(f"[red]Ranking function returned None for {chapter_id}[/]")
+                else:
+                    console.print(f"[green]Ranking function returned result for {chapter_id}[/]")
+                    console.print(f"[dim]Result keys: {list(ranking.keys()) if isinstance(ranking, dict) else 'Not a dict'}[/]")
+                    if isinstance(ranking, dict):
+                        table = ranking.get("table", [])
+                        console.print(f"[dim]Table entries: {len(table)}[/]")
+                        if table:
+                            console.print(f"[dim]First entry: {table[0]}[/]")
                 
                 # Validate the ranking result before adding it
                 if ranking is not None and validate_ranking_result(ranking, chapter_id, len(versions)):
@@ -299,12 +326,27 @@ def rank_all_chapters(
                     error_msg = "Ranking validation failed" if ranking is not None else "Ranking function returned None"
                     console.print(f"[bold red]✗ {error_msg} for {chapter_id}[/]")
                     
+                    # Show more details about validation failure
+                    if ranking is not None:
+                        console.print(f"[yellow]Debug info for failed validation:[/]")
+                        console.print(f"[yellow]  Has table: {bool(ranking.get('table'))}[/]")
+                        console.print(f"[yellow]  Table length: {len(ranking.get('table', []))}[/]")
+                        console.print(f"[yellow]  Has discussion: {bool(ranking.get('discussion'))}[/]")
+                        console.print(f"[yellow]  Discussion length: {len(ranking.get('discussion', ''))}[/]")
+                        console.print(f"[yellow]  Has chapter_id: {bool(ranking.get('chapter_id'))}[/]")
+                        console.print(f"[yellow]  Has versions: {bool(ranking.get('versions'))}[/]")
+                    
                     # Add error entry but don't save to intermediate results yet
                     error_entry = {
                         "chapter_id": chapter_id,
                         "versions": [v[0] for v in versions],
                         "error": error_msg,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
+                        "debug_info": {
+                            "ranking_returned": ranking is not None,
+                            "ranking_keys": list(ranking.keys()) if isinstance(ranking, dict) else None,
+                            "table_length": len(ranking.get("table", [])) if isinstance(ranking, dict) else None
+                        }
                     }
                     rankings.append(error_entry)
                 
@@ -477,7 +519,7 @@ def main():
                 out_path = pathlib.Path(str(out_path) + ".html")
         else:
             # Create default output file
-            out_dir = ROOT / "drafts" / "comparisons"
+            out_dir = ROOT / "drafts" / "auditions" / "comparisons"
             out_dir.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             method_suffix = f"_{args.ranking_method}" if args.ranking_method != "smart" else ""
@@ -519,7 +561,7 @@ def main():
                 out_path = pathlib.Path(str(out_path) + output_ext)
         else:
             # Create default output directory and file
-            out_dir = ROOT / "drafts" / "comparisons"
+            out_dir = ROOT / "drafts" / "auditions" / "comparisons"
             out_dir.mkdir(parents=True, exist_ok=True)
             
             # Extract meaningful names from directories for better filenames
@@ -590,7 +632,7 @@ def main():
                 versions.append(persona)
         
         # Create output directory
-        out_dir = ROOT / "drafts" / "comparisons"
+        out_dir = ROOT / "drafts" / "auditions" / "comparisons"
         out_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate comparison

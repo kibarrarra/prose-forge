@@ -35,4 +35,4 @@ SELF-CHECK:
 List, in bullet form, any line that introduces a new object, event, or
 future plan that was not present in the RAW. Then rewrite the draft to
 remove them.  Return the revised draft only—no extra commentary or labels.
-**CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".
+**CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...". 

@@ -1,22 +1,47 @@
 """
-critics.py - Literary critic simulation and scoring systems
+critics.py - AI critic system for evaluating prose quality
 
-This module handles:
-- Critic system prompts and personas
-- Scoring rubrics and criteria
-- Feedback generation and analysis
+This module provides:
+- Critic personas for different aspects of writing evaluation
+- Scoring rubrics and criteria definitions
+- Comparison feedback generation
 """
 
 from typing import Dict, List, Any
-from utils.llm_client import get_llm_client
+from scripts.utils.llm_client import get_llm_client
 
 # Global constants for scoring rubrics and prompts
 SCORING_CRITERIA = [
-    "Clarity & readability",
-    "Tone & atmosphere", 
-    "Fidelity to original plot points",
-    "Fidelity to original intended tone",
-    "Overall literary quality"
+    {
+        "name": "Clarity & readability",
+        "json_field": "clarity",
+        "description": "How readable and well-structured is the prose?",
+        "short_name": "Clarity"
+    },
+    {
+        "name": "Tone & atmosphere",
+        "json_field": "tone", 
+        "description": "How effectively does it create atmosphere and mood?",
+        "short_name": "Tone"
+    },
+    {
+        "name": "Fidelity to original plot points",
+        "json_field": "plot_fidelity",
+        "description": "How accurately does it preserve original story elements?",
+        "short_name": "Plot Fidelity"
+    },
+    {
+        "name": "Fidelity to original intended tone",
+        "json_field": "tone_fidelity",
+        "description": "How well does it match the original's intended emotional impact?",
+        "short_name": "Tone Fidelity"
+    },
+    {
+        "name": "Overall literary quality",
+        "json_field": "overall",
+        "description": "Holistic assessment of literary merit and effectiveness",
+        "short_name": "Overall"
+    }
 ]
 
 CRITIC_SYSTEM_PROMPT = """You are a simulation of two literary critics (Critic A and Critic B) discussing prose drafts.
@@ -26,7 +51,19 @@ Critic B focuses on creative elements, atmosphere, and storytelling.
 
 Respond in the format of a conversation between these two critics."""
 
-MODEL = "gpt-4o-mini"   # cheap for discussion
+MODEL = "gpt-4.1-mini"   # cheap for discussion
+
+# Helper function to get criteria information
+def get_criteria_by_json_field(field_name: str) -> Dict[str, str]:
+    """Get criterion info by JSON field name."""
+    for criterion in SCORING_CRITERIA:
+        if criterion["json_field"] == field_name:
+            return criterion
+    return None
+
+def get_json_field_names() -> List[str]:
+    """Get list of all JSON field names for scoring criteria."""
+    return [criterion["json_field"] for criterion in SCORING_CRITERIA]
 
 def get_scoring_rubric(context: str = "comparison") -> str:
     """Generate a standardized scoring rubric for critics."""
@@ -64,9 +101,9 @@ Finally, reach a consensus on the rankings.
 ```json
 {
   "table": [
-    {"rank": 1, "id": "DRAFT_[persona name]", "persona": "[persona name]", "clarity": 8, "tone": 6, "plot_fidelity": 7, "tone_fidelity": 9, "overall": 7},
-    {"rank": 2, "id": "DRAFT_[persona name]", "persona": "[persona name]", "clarity": 5, "tone": 8, "plot_fidelity": 6, "tone_fidelity": 6, "overall": 6},
-    {"rank": 3, "id": "DRAFT_[persona name]", "persona": "[persona name]", "clarity": 4, "tone": 5, "plot_fidelity": 8, "tone_fidelity": 4, "overall": 5}
+    {"rank": 1, "id": "DRAFT_[persona name]", "persona": "[persona name]", """ + ', '.join(f'"{c["json_field"]}": [score]' for c in SCORING_CRITERIA) + """},
+    {"rank": 2, "id": "DRAFT_[persona name]", "persona": "[persona name]", """ + ', '.join(f'"{c["json_field"]}": [score]' for c in SCORING_CRITERIA) + """},
+    {"rank": 3, "id": "DRAFT_[persona name]", "persona": "[persona name]", """ + ', '.join(f'"{c["json_field"]}": [score]' for c in SCORING_CRITERIA) + """}
   ],
   "analysis": "Detailed explanation of why the top draft performs best across all criteria...",
   "feedback": {
@@ -77,11 +114,7 @@ Finally, reach a consensus on the rankings.
 ```
 
 NOTE: These scores are format examples only - use the full 1-10 scale based on actual quality assessment. Scores should reflect genuine differences in performance across the five criteria:
-- **Clarity**: How readable and well-structured is the prose?
-- **Tone**: How effectively does it create atmosphere and mood? 
-- **Plot Fidelity**: How accurately does it preserve original story elements?
-- **Tone Fidelity**: How well does it match the original's intended emotional impact?
-- **Overall**: Holistic assessment of literary merit and effectiveness
+""" + '\n'.join(f'- **{c["short_name"]}**: {c["description"]}' for c in SCORING_CRITERIA) + """
 
 IMPORTANT: 
 1. The `id` field should be "DRAFT_[persona name]" 
@@ -89,7 +122,7 @@ IMPORTANT:
 3. Double-check that your rank order matches your scores before submitting the JSON!
 """
     
-    criteria_list = "\n".join(f"{i+1}. {criteria} — score 1-10" for i, criteria in enumerate(SCORING_CRITERIA))
+    criteria_list = "\n".join(f"{i+1}. {criteria['name']} — score 1-10" for i, criteria in enumerate(SCORING_CRITERIA))
     
     return f"""As literary critics, provide an *objective evaluation* of the following prose drafts.
 

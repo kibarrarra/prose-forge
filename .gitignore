@@ -20,3 +20,4 @@ drafts/
 logs/
 outputs/
 *.egg-info/
+.cursorrules
