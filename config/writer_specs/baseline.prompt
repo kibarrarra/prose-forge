@@ -26,7 +26,8 @@ INSTRUCTIONS
    • Focus on making transitions between sentences and ideas *within* each rewritten segment smooth, natural, and stylistically consistent with the VOICE SPEC, rather than just rephrasing sentence by sentence.
 2. Preserve every plot beat and all factual details from the RAW source across the entire chapter.
 3. After processing all segments, perform a SELF-CHECK:
-   – Ensure the overall chapter's total word count is within ±20% of the original RAW text's total word count ({target_words} words). Expand or trim sentences/phrases across segments if needed to meet this target, but do so in a way that maintains stylistic integrity and narrative coherence.
+   - Unless absolutely necessary, replace all em dashes (—) with different stops as appropriate. Strive for no more than 2 em dashes per chapter.
+   – Ensure the overall chapter's total word count is within ±30% of the original RAW text's total word count ({target_words} words). Expand or trim sentences/phrases across segments if needed to meet this target, but do so in a way that maintains stylistic integrity and narrative coherence.
    – Ensure the final sentence ends on **the identical narrative beat** shown in RAW ENDING (no extra closure or foreshadowing).
 4. Output the full chapter with *no segment labels* and no commentary.
    **CRITICAL**: Start the output directly with the chapter text. Do not include preambles like "Here is the draft...".

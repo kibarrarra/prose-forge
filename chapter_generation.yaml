@@ -1,11 +1,14 @@
 # Example configuration for generating multiple chapters with a single voice spec
 # Usage: python scripts/bin/generate_chapters.py --config chapter_generation.yaml
 
-version_name: cosmic_clarity_4pt1_baseline
-voice_spec: config/voice_specs/cosmic_clarity.md
+version_name: cosmic_clarity_custom_4pt1_0temp
 writer_spec: config/writer_specs/baseline.prompt
+editor_spec: config/editor_specs/baseline.md
+voice_spec: config/voice_specs/cosmic_clarity_custom.md
 model: gpt-4.1
-temperature: 0.5
+temperature: 0.0
+range: "1-20"
+
 
 # Option 1: Explicit list of chapters
 # chapters:
@@ -16,7 +19,7 @@ temperature: 0.5
 #   - lotm_0005
 
 # Option 2: Chapter range (uncomment to use instead of explicit list)
-range: "1-5"
+# range: "1-5"
 # prefix: lotm  # optional, defaults to "lotm"
 
 # Option 3: Count-based generation (uncomment to use instead of explicit list)

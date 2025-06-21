@@ -25,6 +25,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from ftfy import fix_text
+from scripts.utils.io_helpers import write_utf8
 
 # progress bar (fallback to plain iterator if tqdm missing)
 try:
@@ -109,7 +110,7 @@ def write_chapters(src: Path, dest_dir: Path, slug: str | None = None) -> None:
     chapters = split_txt_into_chapters(body)
     for num, content in chapters:
         out = dest_dir / f"{tag}_{num:04d}.txt"
-        out.write_text(content.strip() + "\n", encoding="utf-8")
+        write_utf8(out, content.strip() + "\n")
     print(f"✂  {src.name} → {len(chapters)} chapter TXT files")
 
 # ─── helpers to gather input files ─────────────────────────────────────────
