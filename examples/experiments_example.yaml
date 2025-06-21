@@ -3,7 +3,7 @@ experiments:
     writer_spec: config/writer_specs/standard.prompt
     editor_spec: config/editor_specs/baseline.md
     voice_spec: examples/voice_spec_example.md
-    model: claude-3-opus-20240229  # or gpt-4o
+    model: claude-opus-4-20250514  # or gpt-4.1
     chapters:
       - sample_001
     rounds: 1  # Single-pass mode, no editor feedback
@@ -12,7 +12,7 @@ experiments:
     writer_spec: config/writer_specs/standard.prompt
     editor_spec: config/editor_specs/assertive.md
     voice_spec: examples/voice_spec_example.md
-    model: claude-3-opus-20240229
+    model: claude-opus-4-20250514
     chapters:
       - sample_001
     rounds: 2  # Two-pass mode: first draft + one revision with editor feedback 

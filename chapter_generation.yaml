@@ -1,0 +1,55 @@
+# Example configuration for generating multiple chapters with a single voice spec
+# Usage: python scripts/bin/generate_chapters.py --config chapter_generation.yaml
+
+version_name: cosmic_clarity_4pt1_baseline
+voice_spec: config/voice_specs/cosmic_clarity.md
+writer_spec: config/writer_specs/baseline.prompt
+model: gpt-4.1
+temperature: 0.5
+
+# Option 1: Explicit list of chapters
+# chapters:
+#   - lotm_0001
+#   - lotm_0002
+#   - lotm_0003
+#   - lotm_0004
+#   - lotm_0005
+
+# Option 2: Chapter range (uncomment to use instead of explicit list)
+range: "1-5"
+# prefix: lotm  # optional, defaults to "lotm"
+
+# Option 3: Count-based generation (uncomment to use instead of explicit list)
+# count: 5
+# start: 1      # optional, defaults to 1
+# prefix: lotm  # optional, defaults to "lotm"
+
+# Alternative configurations:
+
+# For GPT-4.1 generation with range:
+# version_name: cosmic_clarity_gpt4
+# voice_spec: config/voice_specs/cosmic_clarity.md
+# writer_spec: config/writer_specs/baseline.prompt
+# model: gpt-4.1
+# temperature: 0.5
+# range: "1-10"
+# prefix: lotm
+
+# For generating a large number of chapters:
+# version_name: cosmic_clarity_full_novel
+# voice_spec: config/voice_specs/cosmic_clarity.md
+# writer_spec: config/writer_specs/baseline.prompt
+# model: claude-opus-4-20250514
+# temperature: 0.7
+# count: 50
+# start: 1
+# prefix: lotm
+
+# For a different novel with custom prefix:
+# version_name: my_novel_v1
+# voice_spec: config/voice_specs/cosmic_clarity.md
+# writer_spec: config/writer_specs/baseline.prompt
+# model: claude-opus-4-20250514
+# temperature: 0.7
+# range: "1-20"
+# prefix: novel 

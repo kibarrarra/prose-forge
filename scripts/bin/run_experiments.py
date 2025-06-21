@@ -10,6 +10,7 @@ Usage:
     python scripts/bin/run_experiments.py --config experiments.yaml
     python scripts/bin/run_experiments.py --config experiments.yaml --filter cosmic
     python scripts/bin/run_experiments.py --config experiments.yaml --compare exp1 exp2
+    python scripts/bin/run_experiments.py --generate --config chapter_generation.yaml
 """
 
 import argparse
@@ -35,6 +36,7 @@ sys.path.append(str(PROJECT_ROOT))
 from scripts.utils.logging_helper import get_logger
 from scripts.utils.paths import EXP_SUMM_DIR
 from scripts.core.experiments.runner import ExperimentRunner
+from scripts.utils.subprocess_helpers import run_subprocess_safely, setup_subprocess_env
 
 # Create Rich console for pretty output
 console = Console()
@@ -70,6 +72,31 @@ def filter_experiments(experiments: List[Dict[str, Any]], pattern: str) -> List[
         log.warning(f"No experiments matched pattern: {pattern}")
     
     return filtered
+
+def run_chapter_generation(config_path: str) -> None:
+    """Run chapter generation using the generate_chapters script."""
+    console.print(Panel.fit(
+        f"[bold cyan]Prose-Forge Chapter Generation[/]\n"
+        f"[yellow]Using config:[/] {config_path}",
+        border_style="green"
+    ))
+    
+    # Build command to run generate_chapters.py
+    generate_script = PROJECT_ROOT / "scripts" / "bin" / "generate_chapters.py"
+    cmd = [
+        sys.executable, str(generate_script),
+        "--config", config_path
+    ]
+    
+    # Run the generation script
+    env = setup_subprocess_env()
+    try:
+        run_subprocess_safely(cmd, env, description="chapter generation")
+        console.print("[bold green]Chapter generation completed successfully![/]")
+    except Exception as e:
+        log.error(f"Chapter generation failed: {e}")
+        console.print(f"[bold red]Chapter generation failed:[/] {e}")
+        sys.exit(1)
 
 def generate_html_report(results: List[Dict[str, Any]], output_dir: pathlib.Path) -> str:
     """Generate an HTML report summarizing experiment results.
@@ -271,16 +298,23 @@ def main() -> None:
     ap.add_argument("--filter", help="Filter experiments by name or components")
     ap.add_argument("--output-dir", default=EXP_SUMM_DIR,
                     help="Directory for experiment outputs")
+    ap.add_argument("--generate", action="store_true",
+                    help="Run chapter generation mode instead of experiments")
     
     args = ap.parse_args()
-    
-    # Create output directory
-    output_dir = pathlib.Path(args.output_dir)
-    output_dir.mkdir(exist_ok=True, parents=True)
     
     # For all operations, require config file
     if not args.config:
         ap.error("the --config argument is required")
+    
+    # If in generation mode, delegate to generate_chapters
+    if args.generate:
+        run_chapter_generation(args.config)
+        return
+    
+    # Create output directory
+    output_dir = pathlib.Path(args.output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
     
     # Load experiments
     config = load_experiments(args.config)

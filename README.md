@@ -19,6 +19,7 @@ ProseForge is a programmable pipeline for transforming raw web-novel chapters in
 * **Version Ranking**: Automatically rank and evaluate all versions of chapters
 * **Modular Architecture**: Refactored codebase with 60% code reduction and improved maintainability
 * **External Template Support**: Compatible with custom prompt templates via environment variables
+* **Production Chapter Generation**: Generate multiple chapters with a single voice spec for production use
 
 ---
 
@@ -172,6 +173,113 @@ Each experiment creates all necessary files in the `drafts/auditions/<experiment
 
 ---
 
+## 5.2 Production Chapter Generation
+
+After experimenting and finding a voice spec you like, you can generate multiple chapters for production use:
+
+```bash
+# Using command line arguments with explicit chapter list
+python scripts/bin/generate_chapters.py \
+       --version cosmic_clarity_full \
+       --voice-spec config/voice_specs/cosmic_clarity.md \
+       --writer-spec config/writer_specs/baseline.prompt \
+       --chapters lotm_0001 lotm_0002 lotm_0003 lotm_0004 lotm_0005 \
+       --model claude-opus-4-20250514 \
+       --temperature 0.7
+
+# Using chapter ranges (much more convenient for sequential chapters)
+python scripts/bin/generate_chapters.py \
+       --version cosmic_clarity_full \
+       --voice-spec config/voice_specs/cosmic_clarity.md \
+       --writer-spec config/writer_specs/baseline.prompt \
+       --range 1-20 \
+       --prefix lotm \
+       --model claude-opus-4-20250514
+
+# Using count-based generation
+python scripts/bin/generate_chapters.py \
+       --version cosmic_clarity_full \
+       --voice-spec config/voice_specs/cosmic_clarity.md \
+       --writer-spec config/writer_specs/baseline.prompt \
+       --count 50 \
+       --start 1 \
+       --prefix lotm \
+       --model claude-opus-4-20250514
+
+# Using a configuration file (recommended for larger projects)
+python scripts/bin/generate_chapters.py --config chapter_generation.yaml
+
+# Or use the run_experiments.py wrapper
+python scripts/bin/run_experiments.py --generate --config chapter_generation.yaml
+```
+
+The chapter generation config file (`chapter_generation.yaml`) supports multiple ways to specify chapters:
+
+```yaml
+# Option 1: Explicit chapter list
+version_name: cosmic_clarity_full
+voice_spec: config/voice_specs/cosmic_clarity.md
+writer_spec: config/writer_specs/baseline.prompt
+model: claude-opus-4-20250514
+temperature: 0.7
+chapters:
+  - lotm_0001
+  - lotm_0002
+  - lotm_0003
+  - lotm_0004
+  - lotm_0005
+
+# Option 2: Chapter range (more convenient for sequential chapters)
+version_name: cosmic_clarity_full
+voice_spec: config/voice_specs/cosmic_clarity.md
+writer_spec: config/writer_specs/baseline.prompt
+model: claude-opus-4-20250514
+temperature: 0.7
+range: "1-20"
+prefix: lotm  # optional, defaults to "lotm"
+
+# Option 3: Count-based generation (great for entire novels)
+version_name: cosmic_clarity_full_novel
+voice_spec: config/voice_specs/cosmic_clarity.md
+writer_spec: config/writer_specs/baseline.prompt
+model: claude-opus-4-20250514
+temperature: 0.7
+count: 100
+start: 1      # optional, defaults to 1
+prefix: lotm  # optional, defaults to "lotm"
+```
+
+This creates a structured output under `drafts/[version_name]/`:
+
+```text
+drafts/cosmic_clarity_full/
+├── voice_spec.md           # Copy of the voice spec used
+├── generation_config.yaml  # Configuration for reproducibility
+├── chapters/               # Generated chapter texts
+│   ├── lotm_0001.txt
+│   ├── lotm_0002.txt
+│   └── ...
+└── prompts/                # Prompts used for each chapter
+    ├── lotm_0001_prompt.md
+    ├── lotm_0002_prompt.md
+    └── ...
+```
+
+**Chapter Specification Options:**
+- **Explicit list**: `--chapters lotm_0001 lotm_0002 lotm_0003` or `chapters: [lotm_0001, ...]` in config
+- **Range**: `--range 1-20 --prefix lotm` generates `lotm_0001` through `lotm_0020`
+- **Count**: `--count 50 --start 1 --prefix lotm` generates 50 chapters starting from `lotm_0001`
+
+**Key features:**
+- **Sequential consistency**: Each chapter uses the previous chapter for context
+- **Organized outputs**: All files are neatly organized by version
+- **Prompt preservation**: All prompts are saved for debugging/analysis
+- **Progress tracking**: Rich progress bars show generation status
+- **Batch processing**: Generate entire novels or sections efficiently
+- **Flexible chapter specification**: Use explicit lists, ranges, or counts
+
+---
+
 ## 6  Architecture & Directory Layout
 
 ### 6.1 Refactored Code Structure
@@ -185,7 +293,8 @@ scripts/
 │   ├── editor_panel.py
 │   ├── sanity_checker.py
 │   ├── run_experiments.py # Clean version using ExperimentRunner
-│   └── compare_versions.py
+│   ├── compare_versions.py
+│   └── generate_chapters.py # Production chapter generation
 ├── core/                   # Business logic modules
 │   ├── writing/           # Core writing functionality
 │   │   ├── prompts.py     # PromptBuilder class
@@ -226,11 +335,16 @@ prose-forge/
 │   ├── context/             # clean plaintext context files
 │   └── segments/            # paragraph-level slices
 ├── drafts/
-│   └── auditions/
-│       └── <experiment_name>/
-│           ├── round_1/     # writer → critic loop dirs
-│           ├── round_2/
-│           └── final/
+│   ├── auditions/           # experiment outputs
+│   │   └── <experiment_name>/
+│   │       ├── round_1/     # writer → critic loop dirs
+│   │       ├── round_2/
+│   │       └── final/
+│   └── <version_name>/      # production outputs
+│       ├── voice_spec.md
+│       ├── generation_config.yaml
+│       ├── chapters/
+│       └── prompts/
 ├── config/
 │   ├── voice_specs/*.md     # tone/voice definitions
 │   ├── writer_specs/*.prompt  # writer prompt templates with placeholders
@@ -242,7 +356,8 @@ prose-forge/
 ├── archive/                 # legacy scripts and docs
 ├── scripts/                 # refactored CLI tools and core modules
 ├── utils/                   # shared helpers (legacy location)
-└── experiments.yaml         # configuration for experiment runs
+├── experiments.yaml         # configuration for experiment runs
+└── chapter_generation.yaml  # configuration for production generation
 ```
 
 ---
@@ -298,6 +413,23 @@ python scripts/bin/run_experiments.py --compare exp1 exp2
 python scripts/bin/run_experiments.py --compare-dirs dir1 dir2
 ```
 
+### Generating Production Chapters
+
+```bash
+# Generate multiple chapters with a single voice spec
+python scripts/bin/generate_chapters.py --config chapter_generation.yaml
+
+# Or use the run_experiments wrapper
+python scripts/bin/run_experiments.py --generate --config chapter_generation.yaml
+
+# Command line usage
+python scripts/bin/generate_chapters.py \
+       --version my_novel_v1 \
+       --voice-spec config/voice_specs/cosmic_clarity.md \
+       --writer-spec config/writer_specs/baseline.prompt \
+       --chapters chapter1 chapter2 chapter3
+```
+
 ### Comparing and Ranking Versions
 
 ```bash
@@ -331,6 +463,7 @@ python scripts/bin/writer.py lotm_0001 --spec config/voice_specs/cosmic_clarity.
 - Experiment results are saved in the `drafts/experiment_summaries` directory
 - HTML reports provide detailed metrics and comparisons
 - Version rankings show scores for clarity, tone, faithfulness, and overall quality
+- Production chapters are organized under `drafts/<version_name>/` with all prompts preserved
 
 ---
 

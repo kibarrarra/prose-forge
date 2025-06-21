@@ -19,7 +19,7 @@ from utils.llm_client import get_llm_client
 import tiktoken
 
 log = get_logger()
-MODEL = "gpt-4o-mini"   # cheap for discussion
+MODEL = "gpt-4.1-mini"   # cheap for discussion
 
 client = get_llm_client()
 

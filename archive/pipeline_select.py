@@ -12,7 +12,7 @@ JUDGES = [
 ]
 
 def ask_judge(prompt, temp=0):
-    r = client.chat.completions.create(model="gpt-4o-mini",
+    r = client.chat.completions.create(model="gpt-4.1-mini",
             messages=[{"role":"system","content":"Return ONLY a number 1-10."},
                       {"role":"user","content":prompt}],
             temperature=temp, max_tokens=5)

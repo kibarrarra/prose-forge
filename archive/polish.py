@@ -29,7 +29,7 @@ PROMPT = textwrap.dedent("""\
 
 def polish_para(chapter_ctx: str, para_text: str) -> str:
     r = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4.1-mini",
         temperature=0.2,
         messages=[{"role": "user",
                    "content": PROMPT.format(ctx=chapter_ctx, para=para_text)}],
