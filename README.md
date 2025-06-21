@@ -9,7 +9,7 @@ ProseForge is a programmable pipeline for transforming raw web-novel chapters in
 * End-to-end workflow from **raw scrape → segmentation → first draft → iterative critic/writer loops → final copy**.
 * Pluggable **voice specifications** (markdown files) that define tone, diction, and stylistic guard-rails.
 * Supports **multi-round experiments** across different voice specs and prompts.
-* Generate cleaned plaintext context files with `scripts/export_original.py`.
+* Generate cleaned plaintext context files with `scripts/bin/export_original.py`.
 * Works with **Anthropic Claude 3**, **OpenAI GPT-4o**, or any chat-completion-compatible client (configure via `utils/llm_client.py`).
 * Structured JSON feedback from the editor panel is round-tripped into the writer to apply mandatory and nice-to-have fixes.
 * **Experiment Runner**: Run experiments with different voice specifications, writer models, and editor configurations
@@ -80,10 +80,12 @@ Large novels are easier to manage in slices (e.g. 20-chapter chunks) but the cra
 
 Paragraph-level segmentation gives each chunk a stable ID so later feedback can target exact passages.
 
-```powershell
-Get-ChildItem data/raw/lotm/*.json | ForEach-Object {
-    python archive/segment.py $_ --out data/segments/lotm --mode para
-}
+```bash
+# Process individual files or entire directories
+python scripts/bin/segment_chapters.py data/raw/lotm_full.json --slug lotm --dest data/segments/lotm
+
+# Process all JSON files in a directory with progress bar
+python scripts/bin/segment_chapters.py data/raw/lotm --dest data/segments/lotm --recursive
 ```
 
 You will get files like `lotm_0001_p001.txt`, `lotm_0001_p002.txt`, … which together equal the source chapter.
@@ -93,8 +95,8 @@ You will get files like `lotm_0001_p001.txt`, `lotm_0001_p002.txt`, … which to
 Run the helper below to create `data/context/<chapter>.txt` files used by the writer:
 
 ```bash
-python scripts/export_original.py --all        # process every chapter
-python scripts/export_original.py lotm_0001    # just one
+python scripts/bin/export_original.py --all        # process every chapter
+python scripts/bin/export_original.py lotm_0001    # just one
 ```
 
 ---
@@ -294,7 +296,9 @@ scripts/
 │   ├── sanity_checker.py
 │   ├── run_experiments.py # Clean version using ExperimentRunner
 │   ├── compare_versions.py
-│   └── generate_chapters.py # Production chapter generation
+│   ├── generate_chapters.py # Production chapter generation
+│   ├── export_original.py # Generate clean plaintext context files
+│   └── segment_chapters.py # Split novels into individual chapters
 ├── core/                   # Business logic modules
 │   ├── writing/           # Core writing functionality
 │   │   ├── prompts.py     # PromptBuilder class

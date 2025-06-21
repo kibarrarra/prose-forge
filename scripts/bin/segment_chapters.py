@@ -16,9 +16,14 @@ python scripts/segment_chapters.py data/raw/novels --recursive
 """
 
 from __future__ import annotations
-import argparse, html, json, re, unicodedata
+import argparse, html, json, re, unicodedata, sys
 from pathlib import Path
 from typing import List, Iterable
+
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.append(str(PROJECT_ROOT))
+
 from ftfy import fix_text
 
 # progress bar (fallback to plain iterator if tqdm missing)

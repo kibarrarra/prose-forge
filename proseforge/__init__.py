@@ -1,1 +1,0 @@
-"""ProseForge core package."""

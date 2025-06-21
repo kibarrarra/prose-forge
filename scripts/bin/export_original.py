@@ -11,11 +11,16 @@ The cleaning logic is identical to load_raw_text() in writer.py.
 """
 
 from __future__ import annotations
-import argparse, json, pathlib, re
+import argparse, json, pathlib, re, sys
 from pathlib import Path
-from utils.io_helpers import read_utf8, write_utf8
-from utils.paths import RAW_DIR, SEG_DIR, CTX_DIR
-from utils.logging_helper import get_logger
+
+# Add project root to path
+PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
+sys.path.append(str(PROJECT_ROOT))
+
+from scripts.utils.io_helpers import read_utf8, write_utf8
+from scripts.utils.paths import RAW_DIR, SEG_DIR, CTX_DIR
+from scripts.utils.logging_helper import get_logger
 from ftfy import fix_text
 
 log = get_logger()
@@ -24,7 +29,7 @@ log = get_logger()
 # ---------------------------------------------------------------------------
 # fallback cleaners if segment_chapters is not available
 try:
-    from scripts.segment_chapters import strip_html, normalise  # type: ignore
+    from scripts.bin.segment_chapters import strip_html, normalise  # type: ignore
 except ImportError:
     import html, unicodedata
     _TAG = re.compile(r"<[^>]+>")

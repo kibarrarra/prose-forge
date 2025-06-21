@@ -31,7 +31,7 @@ logs/
 ## Command Cheat Sheet
 
 # split crawler mega-JSON
-python scripts/segment_chapters.py data/raw/full.json --slug lotm
+python scripts/bin/segment_chapters.py data/raw/full.json --slug lotm
 
 # audition all personae on chapters 1-3
 python scripts/audition.py

@@ -1,7 +1,0 @@
-README.md
-pyproject.toml
-proseforge/proseforge.egg-info/PKG-INFO
-proseforge/proseforge.egg-info/SOURCES.txt
-proseforge/proseforge.egg-info/dependency_links.txt
-proseforge/proseforge.egg-info/requires.txt
-proseforge/proseforge.egg-info/top_level.txt
